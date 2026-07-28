@@ -81,11 +81,41 @@ export async function setAppLockEnabled(on: boolean): Promise<void> {
   await saveJSON(StorageKeys.appLock, on);
 }
 
+/**
+ * Serialises biometric prompts across the whole app.
+ *
+ * Two independent gates can want the sensor at once — the per-note lock in
+ * `note/[id]` and the whole-app `AppLockGate` — and each call constructs its
+ * own `LAContext` with no in-flight check of its own. Overlapping prompts let
+ * iOS cancel one of them, which surfaces to us as an ordinary `success: false`
+ * and is indistinguishable from the user failing to authenticate; that is one
+ * half of how the app could end up impossible to unlock.
+ *
+ * Whoever asks first owns the sheet; a second caller arriving while it is up
+ * awaits the SAME result rather than racing a second sheet.
+ *
+ * Note this guards only *prompting*. It deliberately does not gate any
+ * re-locking decision — suppressing a lock while auth happens to be in flight
+ * would let a real backgrounding slip through unlocked.
+ */
+let inFlightAuth: Promise<boolean> | null = null;
+
+export function isAuthPromptInFlight(): boolean {
+  return inFlightAuth !== null;
+}
+
 export async function authenticateBiometric(reason: string): Promise<boolean> {
-  const result = await LocalAuthentication.authenticateAsync({
+  if (inFlightAuth) return inFlightAuth;
+
+  inFlightAuth = LocalAuthentication.authenticateAsync({
     promptMessage: reason,
     // Let the user fall back to their device passcode if biometrics fail.
     disableDeviceFallback: false,
-  });
-  return result.success;
+  })
+    .then((result) => result.success)
+    .finally(() => {
+      inFlightAuth = null;
+    });
+
+  return inFlightAuth;
 }

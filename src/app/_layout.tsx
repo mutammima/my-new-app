@@ -10,9 +10,15 @@ import { AppLockProvider } from '@/context/app-lock-context';
 import { AuthProvider, useAuth } from '@/context/auth-context';
 import { ThemePreferenceProvider, useThemeScheme } from '@/context/theme-context';
 import { NotesProvider } from '@/context/notes-context';
+import { enableAppSwitcherPrivacy } from '@/lib/privacy-screen';
 import { isSupabaseConfigured } from '@/lib/supabase';
 
 SplashScreen.preventAutoHideAsync();
+
+// Install the native app-switcher cover as early as possible — before any
+// note can be opened, and independent of React's render timing. See
+// src/lib/privacy-screen.ts for why this cannot be done from a component.
+enableAppSwitcherPrivacy();
 
 /**
  * Chooses which routes are reachable based on auth state. Expo Router's
