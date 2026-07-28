@@ -46,6 +46,9 @@ interface NotesContextValue {
   isUnseen: (note: Note) => boolean;
   /** Record the note as read up to its current `updatedAt`. */
   markSeen: (id: string) => void;
+  /** Whether YOU pinned this note to the top (a private, unsynced choice). */
+  isPinned: (id: string) => boolean;
+  togglePinned: (id: string) => void;
 }
 
 const NotesContext = createContext<NotesContextValue | null>(null);
@@ -90,9 +93,17 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
   const [seen, setSeenState] = useState<Record<string, number>>({});
   const seenRef = useRef<Record<string, number>>({});
 
+  // Pinned note ids. Deliberately LOCAL per person (same shape as `seen`,
+  // stored per-uid) rather than a synced column: a shared note may be
+  // important to one partner and not the other, and pinning is a personal
+  // organisation choice, not shared content.
+  const [pinned, setPinnedState] = useState<Record<string, true>>({});
+  const pinnedRef = useRef<Record<string, true>>({});
+
   const notesKey = uid ? `${StorageKeys.notes}.${uid}` : null;
   const pendingKey = uid ? `${StorageKeys.pending}.${uid}` : null;
   const seenKey = uid ? `${StorageKeys.seen}.${uid}` : null;
+  const pinnedKey = uid ? `${StorageKeys.pinned}.${uid}` : null;
 
   const setNotes = useCallback((next: Note[]) => {
     notesRef.current = next;
@@ -128,6 +139,20 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
   const isUnseen = useCallback(
     (note: Note) => (seen[note.id] ?? -1) < note.updatedAt,
     [seen],
+  );
+
+  const isPinned = useCallback((id: string) => pinned[id] === true, [pinned]);
+
+  const togglePinned = useCallback(
+    (id: string) => {
+      const next = { ...pinnedRef.current };
+      if (next[id]) delete next[id];
+      else next[id] = true;
+      pinnedRef.current = next;
+      setPinnedState(next);
+      if (pinnedKey) saveJSON(pinnedKey, next).catch(() => {});
+    },
+    [pinnedKey],
   );
 
   const refreshPendingCount = useCallback(() => {
@@ -295,7 +320,11 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
       const cached = await loadJSON<Note[]>(`${StorageKeys.notes}.${uid}`, []);
       const queue = await loadJSON<PendingQueue>(`${StorageKeys.pending}.${uid}`, { dirty: [], deleted: [] });
       const storedSeen = await loadJSON<Record<string, number> | null>(`${StorageKeys.seen}.${uid}`, null);
+      const storedPinned = await loadJSON<Record<string, true>>(`${StorageKeys.pinned}.${uid}`, {});
       if (!active) return;
+
+      pinnedRef.current = storedPinned;
+      setPinnedState(storedPinned);
 
       dirtyRef.current = new Set(queue.dirty);
       deletedRef.current = new Set(queue.deleted);
@@ -487,6 +516,8 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
       syncNow,
       isUnseen,
       markSeen,
+      isPinned,
+      togglePinned,
     }),
     [
       notes,
@@ -504,6 +535,8 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
       syncNow,
       isUnseen,
       markSeen,
+      isPinned,
+      togglePinned,
     ],
   );
 

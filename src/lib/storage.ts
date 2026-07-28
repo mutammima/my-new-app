@@ -23,6 +23,9 @@ export const StorageKeys = {
   pin: 'duonotes.pin', // SecureStore — JSON { salt, hash }
   appLock: 'duonotes.appLock', // AsyncStorage — boolean, gate the whole app behind PIN/biometric
   seen: 'duonotes.seen', // AsyncStorage prefix — `${seen}.${userId}` -> { [noteId]: updatedAt }
+  // Pinned-to-top note ids, per person — a shared note can matter to one
+  // partner and not the other, so this is deliberately not synced.
+  pinned: 'duonotes.pinned', // AsyncStorage prefix — `${pinned}.${userId}` -> { [noteId]: true }
 } as const;
 
 /* ------------------------------- AsyncStorage ------------------------------ */

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, AppState, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ConfirmModal } from '@/components/confirm-modal';
 import { LinkPartnerSheet } from '@/components/link-partner-sheet';
 import { PinModal } from '@/components/pin-modal';
 import { RichNoteEditor } from '@/components/rich-note-editor';
@@ -39,6 +40,7 @@ export default function NoteEditorScreen() {
   const [pinTask, setPinTask] = useState<'unlock' | 'enable' | null>(null);
   // Invite/link-partner sheet, opened when you share without a partner linked.
   const [showLink, setShowLink] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const locked = note ? note.lockType !== 'none' : false;
 
@@ -235,19 +237,7 @@ export default function NoteEditorScreen() {
     Alert.alert('Lock note', 'Keep this note hidden until it is unlocked.', options);
   };
 
-  const confirmDelete = () => {
-    Alert.alert('Delete note?', 'This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          await deleteNote(activeNote.id);
-          router.back();
-        },
-      },
-    ]);
-  };
+  const confirmDelete = () => setDeleting(true);
 
   const onPinModalSubmit = async (pin: string): Promise<boolean> => {
     if (pinTask === 'unlock') {
@@ -336,6 +326,19 @@ export default function NoteEditorScreen() {
         title={pinTask === 'enable' ? 'Set a PIN' : 'Enter your PIN'}
         onSubmit={onPinModalSubmit}
         onCancel={() => setPinTask(null)}
+      />
+
+      <ConfirmModal
+        visible={deleting}
+        title="Delete note?"
+        message="This cannot be undone."
+        confirmLabel="Delete"
+        onCancel={() => setDeleting(false)}
+        onConfirm={async () => {
+          setDeleting(false);
+          await deleteNote(activeNote.id);
+          router.back();
+        }}
       />
 
       <LinkPartnerSheet

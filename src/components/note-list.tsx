@@ -1,8 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { useMemo, useRef, useState } from 'react';
+import { FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import ReanimatedSwipeable, {
+  type SwipeableMethods,
+} from 'react-native-gesture-handler/ReanimatedSwipeable';
 
+import { ConfirmModal } from '@/components/confirm-modal';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -33,16 +37,24 @@ export function NoteList({
 }) {
   const theme = useTheme();
   const [query, setQuery] = useState('');
+  const { isPinned } = useNotes();
+
+  // Pinned notes float to the top; within each group the caller's existing
+  // most-recent-first order is preserved (`sort` is stable in JS).
+  const ordered = useMemo(
+    () => [...notes].sort((a, b) => Number(isPinned(b.id)) - Number(isPinned(a.id))),
+    [notes, isPinned],
+  );
 
   // Plain-text extraction only needs to re-run when the notes themselves
   // change, not on every keystroke — filtering against the cached lowercase
   // text below is a cheap string scan either way.
-  const searchIndex = useMemo(() => buildSearchIndex(notes), [notes]);
+  const searchIndex = useMemo(() => buildSearchIndex(ordered), [ordered]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return notes;
+    if (!q) return ordered;
     return searchIndex.filter((s) => s.titleLower.includes(q) || s.bodyLower.includes(q)).map((s) => s.note);
-  }, [searchIndex, query, notes]);
+  }, [searchIndex, query, ordered]);
 
   if (notes.length === 0) {
     return <EmptyState icon={emptyIcon} theme={theme} text={emptyLabel} />;
@@ -113,25 +125,72 @@ function EmptyState({
 function NoteRow({ note }: { note: Note }) {
   const theme = useTheme();
   const router = useRouter();
-  const { deleteNote, isUnseen } = useNotes();
+  const { deleteNote, isUnseen, isPinned, togglePinned } = useNotes();
   const locked = note.lockType !== 'none';
   const updated = isUnseen(note);
-
-  function confirmDelete() {
-    Alert.alert('Delete note?', 'This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => deleteNote(note.id) },
-    ]);
-  }
+  const pinned = isPinned(note.id);
+  const [confirming, setConfirming] = useState(false);
+  const swipeRef = useRef<SwipeableMethods>(null);
 
   const preview = locked
     ? 'Locked — tap to unlock'
     : htmlToPlain(note.body) || 'No additional text';
 
+  /** Right-side swipe actions: pin/unpin, and delete. */
+  function renderActions() {
+    return (
+      <View style={styles.actions}>
+        <Pressable
+          onPress={() => {
+            togglePinned(note.id);
+            swipeRef.current?.close();
+          }}
+          style={[styles.action, { backgroundColor: theme.accent }]}>
+          <Ionicons name={pinned ? 'pin' : 'pin-outline'} size={20} color={theme.onAccent} />
+          <ThemedText type="small" style={{ color: theme.onAccent }}>
+            {pinned ? 'Unpin' : 'Pin'}
+          </ThemedText>
+        </Pressable>
+        <Pressable
+          onPress={() => {
+            // Leave the row open behind the dialog so it's obvious which note
+            // is about to be deleted; it closes on cancel.
+            setConfirming(true);
+          }}
+          style={[styles.action, styles.deleteAction]}>
+          <Ionicons name="trash-outline" size={20} color="#fff" />
+          <ThemedText type="small" style={styles.deleteLabel}>
+            Delete
+          </ThemedText>
+        </Pressable>
+      </View>
+    );
+  }
+
   return (
-    <Pressable
+    <ReanimatedSwipeable
+      ref={swipeRef}
+      renderRightActions={renderActions}
+      friction={2}
+      rightThreshold={40}
+      overshootRight={false}>
+      <ConfirmModal
+        visible={confirming}
+        title="Delete note?"
+        message="This cannot be undone."
+        confirmLabel="Delete"
+        onCancel={() => {
+          setConfirming(false);
+          swipeRef.current?.close();
+        }}
+        onConfirm={() => {
+          setConfirming(false);
+          deleteNote(note.id);
+        }}
+      />
+      <Pressable
       onPress={() => router.push({ pathname: '/note/[id]', params: { id: note.id } })}
-      onLongPress={confirmDelete}
+      onLongPress={() => setConfirming(true)}
       delayLongPress={400}
       style={({ pressed }) => [
         styles.row,
@@ -152,6 +211,7 @@ function NoteRow({ note }: { note: Note }) {
         </View>
       </View>
       <View style={styles.badges}>
+        {pinned && <Ionicons name="pin" size={14} color={theme.accent} />}
         {updated && (
           <View style={[styles.updatedDot, { backgroundColor: theme.accent }]}>
             <Ionicons name="sparkles" size={11} color={theme.onAccent} />
@@ -166,7 +226,8 @@ function NoteRow({ note }: { note: Note }) {
           />
         )}
       </View>
-    </Pressable>
+      </Pressable>
+    </ReanimatedSwipeable>
   );
 }
 
@@ -181,6 +242,17 @@ function formatWhen(ts: number): string {
 }
 
 const styles = StyleSheet.create({
+  actions: { flexDirection: 'row', alignItems: 'stretch', marginBottom: Spacing.two },
+  action: {
+    width: 74,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    borderRadius: Spacing.three,
+    marginLeft: Spacing.two,
+  },
+  deleteAction: { backgroundColor: '#E5484D' },
+  deleteLabel: { color: '#fff' },
   searchRow: { paddingHorizontal: Spacing.four, paddingBottom: Spacing.three },
   searchBar: {
     flexDirection: 'row',

@@ -9,8 +9,8 @@ Bugs (highest priority — user-reported regressions / privacy):
 - [x] 7. App-lock unlock deadlock — DONE (Face ID sheet's own 'inactive' was treated as leaving the app; now keyed on 'background' + prompt mutex)
 
 UI polish:
-- [ ] 4. Delete-note prompt must match app UI (currently native Alert.alert) — pending
-- [ ] 5. Swipe a note to pin-to-top or delete — pending
+- [x] 4. Delete-note prompt matches app UI — DONE (ConfirmModal; transparent presentation so it works over the presented note screen)
+- [x] 5. Swipe to pin/delete — DONE (ReanimatedSwipeable; pin is private per-person, mirrors the local `seen` map)
 - [ ] 12. Bubble/badge on the bottom "Shared" tab when the partner posts an update — pending
 
 Features:
