@@ -11,14 +11,14 @@ Bugs (highest priority — user-reported regressions / privacy):
 UI polish:
 - [x] 4. Delete-note prompt matches app UI — DONE (ConfirmModal; transparent presentation so it works over the presented note screen)
 - [x] 5. Swipe to pin/delete — DONE (ReanimatedSwipeable; pin is private per-person, mirrors the local `seen` map)
-- [ ] 12. Bubble/badge on the bottom "Shared" tab when the partner posts an update — pending
+- [x] 12. Shared-tab badge — DONE (counts only the partner's unseen changes; your own edits self-mark)
 
 Features:
-- [ ] 6. Live viewer: partner presence — **decided: "partner is here" badge only** (no live cursor, no live text) — pending
-- [ ] 8. Notes list: two collapsible sections/folders — "Shared notes" and "Your notes" — pending
-- [ ] 9. Custom user-created collections — **decided: private per-person** (no new synced table) — pending
-- [ ] 10. Theme: replace the 4 fixed accent colors with a controllable hue — **decided: color wheel** (tap/drag) — pending
-- [ ] 11. Animate/transition the dark ⇄ light switch instead of snapping — pending
+- [x] 6. Partner presence — DONE (Supabase presence channel; shows their name in THEIR accent hue)
+- [x] 8. Collapsible Shared/Your notes sections — DONE (CollectionList)
+- [x] 9. Custom collections — DONE (private per-person, local; deleting one unfiles notes, never deletes them)
+- [x] 10. Hue wheel — DONE (0-360; legacy 4 presets migrate to their equivalent hues)
+- [x] 11. Dark/light cross-fade — DONE (420ms eased; every colour token interpolated)
 
 ### Decisions captured from clarifying questions (2026-07-23)
 - **Live viewer fidelity:** "partner is here" badge only. Explicitly NOT live cursor position and NOT full

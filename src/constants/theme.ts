@@ -52,6 +52,70 @@ export function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+/* ------------------------------ Accent hue ------------------------------- */
+
+/**
+ * The accent is a freely-chosen hue rather than one of four presets.
+ * Saturation and lightness are held fixed so every hue lands at roughly the
+ * same vibrancy as the old palette — these are Rose (#E6488E) converted to
+ * HSL, so the default hue looks exactly like the app always has.
+ */
+export const ACCENT_SATURATION = 0.76;
+export const ACCENT_LIGHTNESS = 0.59;
+
+/** Hue of the former `rose` default, so existing installs look unchanged. */
+export const DEFAULT_ACCENT_HUE = 333;
+
+/** The four legacy presets as hues — used to migrate saved preferences. */
+export const LEGACY_ACCENT_HUES: Record<AccentKey, number> = {
+  rose: 333,
+  coral: 351,
+  lavender: 258,
+  blue: 216,
+};
+
+/** Accent hex for a hue on the colour wheel (0–360). */
+export function accentFromHue(
+  hue: number,
+  s = ACCENT_SATURATION,
+  l = ACCENT_LIGHTNESS,
+): string {
+  const h = ((hue % 360) + 360) % 360;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  const [r, g, b] =
+    h < 60 ? [c, x, 0]
+    : h < 120 ? [x, c, 0]
+    : h < 180 ? [0, c, x]
+    : h < 240 ? [0, x, c]
+    : h < 300 ? [x, 0, c]
+    : [c, 0, x];
+  const to255 = (v: number) =>
+    Math.round((v + m) * 255)
+      .toString(16)
+      .padStart(2, '0');
+  return `#${to255(r)}${to255(g)}${to255(b)}`;
+}
+
+/* --------------------------- Scheme cross-fade --------------------------- */
+
+function channels(hex: string): [number, number, number] {
+  const h = hex.replace('#', '');
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+/** Blend two hex colours. `t` of 0 returns `from`, 1 returns `to`. */
+export function mixHex(from: string, to: string, t: number): string {
+  const [r1, g1, b1] = channels(from);
+  const [r2, g2, b2] = channels(to);
+  const mix = (a: number, b: number) =>
+    Math.round(a + (b - a) * t)
+      .toString(16)
+      .padStart(2, '0');
+  return `#${mix(r1, r2)}${mix(g1, g2)}${mix(b1, b2)}`;
+}
+
 export const Fonts = Platform.select({
   ios: {
     sans: 'system-ui',

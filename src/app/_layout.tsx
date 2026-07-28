@@ -7,6 +7,7 @@ import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { AppLockGate } from '@/components/app-lock-gate';
 import { ConfigNotice } from '@/components/config-notice';
 import { AppLockProvider } from '@/context/app-lock-context';
+import { CollectionsProvider } from '@/context/collections-context';
 import { AuthProvider, useAuth } from '@/context/auth-context';
 import { ThemePreferenceProvider, useThemeScheme } from '@/context/theme-context';
 import { NotesProvider } from '@/context/notes-context';
@@ -71,11 +72,13 @@ function ThemedRoot() {
       {isSupabaseConfigured ? (
         <AuthProvider>
           <NotesProvider>
-            <AppLockProvider>
-              <AppLockGate>
-                <RootNavigator />
-              </AppLockGate>
-            </AppLockProvider>
+            <CollectionsProvider>
+              <AppLockProvider>
+                <AppLockGate>
+                  <RootNavigator />
+                </AppLockGate>
+              </AppLockProvider>
+            </CollectionsProvider>
           </NotesProvider>
         </AuthProvider>
       ) : (

@@ -10,9 +10,11 @@ import { PinModal } from '@/components/pin-modal';
 import { RichNoteEditor } from '@/components/rich-note-editor';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { accentFromHue, Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useNotes } from '@/context/notes-context';
+import { useAccentHue } from '@/context/theme-context';
+import { useNotePresence } from '@/hooks/use-note-presence';
 import { useTheme } from '@/hooks/use-theme';
 import { setLockedNotePrivacy } from '@/lib/privacy-screen';
 import {
@@ -41,6 +43,8 @@ export default function NoteEditorScreen() {
   // Invite/link-partner sheet, opened when you share without a partner linked.
   const [showLink, setShowLink] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const myHue = useAccentHue();
+  const partnerHere = useNotePresence(note?.isShared ? id : undefined, myHue);
 
   const locked = note ? note.lockType !== 'none' : false;
 
@@ -315,6 +319,17 @@ export default function NoteEditorScreen() {
                   </ThemedText>
                 </View>
               )}
+              {partnerHere && (
+                // Their theme colour, not yours — so it reads as "them".
+                <View style={styles.sharedBanner}>
+                  <View
+                    style={[styles.presenceDot, { backgroundColor: accentFromHue(partnerHere.hue) }]}
+                  />
+                  <ThemedText type="small" style={{ color: accentFromHue(partnerHere.hue) }}>
+                    {partnerHere.name} is viewing this note
+                  </ThemedText>
+                </View>
+              )}
             </View>
           </RichNoteEditor>
         )}
@@ -407,6 +422,7 @@ const styles = StyleSheet.create({
   editorHead: { paddingHorizontal: Spacing.four, paddingTop: Spacing.two, gap: Spacing.two },
   titleInput: { fontSize: 26, fontWeight: '700', paddingTop: Spacing.two },
   sharedBanner: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+  presenceDot: { width: 8, height: 8, borderRadius: 4 },
   gate: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.two, padding: Spacing.four },
   gateText: { textAlign: 'center' },
   unlockButton: {

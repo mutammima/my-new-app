@@ -49,6 +49,9 @@ interface NotesContextValue {
   /** Whether YOU pinned this note to the top (a private, unsynced choice). */
   isPinned: (id: string) => boolean;
   togglePinned: (id: string) => void;
+  /** How many shared notes your PARTNER has touched since you last looked —
+   *  drives the badge on the Shared tab. Your own edits never count. */
+  unseenSharedCount: number;
 }
 
 const NotesContext = createContext<NotesContextValue | null>(null);
@@ -499,6 +502,13 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
   );
   const sharedNotes = useMemo(() => notes.filter((n) => n.isShared).sort(byRecent), [notes]);
 
+  // Only the partner's changes should badge the tab — a note you edited
+  // yourself is marked seen as you type (see `touchSeen`).
+  const unseenSharedCount = useMemo(
+    () => sharedNotes.filter((n) => n.ownerId !== uid && isUnseen(n)).length,
+    [sharedNotes, uid, isUnseen],
+  );
+
   const value = useMemo<NotesContextValue>(
     () => ({
       notes,
@@ -518,6 +528,7 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
       markSeen,
       isPinned,
       togglePinned,
+      unseenSharedCount,
     }),
     [
       notes,
@@ -537,6 +548,7 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
       markSeen,
       isPinned,
       togglePinned,
+      unseenSharedCount,
     ],
   );
 

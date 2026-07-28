@@ -1,12 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
-import ReanimatedSwipeable, {
-  type SwipeableMethods,
-} from 'react-native-gesture-handler/ReanimatedSwipeable';
 
-import { ConfirmModal } from '@/components/confirm-modal';
+import { NoteRow } from '@/components/note-row';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -120,125 +116,6 @@ function EmptyState({
       </ThemedText>
     </ThemedView>
   );
-}
-
-function NoteRow({ note }: { note: Note }) {
-  const theme = useTheme();
-  const router = useRouter();
-  const { deleteNote, isUnseen, isPinned, togglePinned } = useNotes();
-  const locked = note.lockType !== 'none';
-  const updated = isUnseen(note);
-  const pinned = isPinned(note.id);
-  const [confirming, setConfirming] = useState(false);
-  const swipeRef = useRef<SwipeableMethods>(null);
-
-  const preview = locked
-    ? 'Locked — tap to unlock'
-    : htmlToPlain(note.body) || 'No additional text';
-
-  /** Right-side swipe actions: pin/unpin, and delete. */
-  function renderActions() {
-    return (
-      <View style={styles.actions}>
-        <Pressable
-          onPress={() => {
-            togglePinned(note.id);
-            swipeRef.current?.close();
-          }}
-          style={[styles.action, { backgroundColor: theme.accent }]}>
-          <Ionicons name={pinned ? 'pin' : 'pin-outline'} size={20} color={theme.onAccent} />
-          <ThemedText type="small" style={{ color: theme.onAccent }}>
-            {pinned ? 'Unpin' : 'Pin'}
-          </ThemedText>
-        </Pressable>
-        <Pressable
-          onPress={() => {
-            // Leave the row open behind the dialog so it's obvious which note
-            // is about to be deleted; it closes on cancel.
-            setConfirming(true);
-          }}
-          style={[styles.action, styles.deleteAction]}>
-          <Ionicons name="trash-outline" size={20} color="#fff" />
-          <ThemedText type="small" style={styles.deleteLabel}>
-            Delete
-          </ThemedText>
-        </Pressable>
-      </View>
-    );
-  }
-
-  return (
-    <ReanimatedSwipeable
-      ref={swipeRef}
-      renderRightActions={renderActions}
-      friction={2}
-      rightThreshold={40}
-      overshootRight={false}>
-      <ConfirmModal
-        visible={confirming}
-        title="Delete note?"
-        message="This cannot be undone."
-        confirmLabel="Delete"
-        onCancel={() => {
-          setConfirming(false);
-          swipeRef.current?.close();
-        }}
-        onConfirm={() => {
-          setConfirming(false);
-          deleteNote(note.id);
-        }}
-      />
-      <Pressable
-      onPress={() => router.push({ pathname: '/note/[id]', params: { id: note.id } })}
-      onLongPress={() => setConfirming(true)}
-      delayLongPress={400}
-      style={({ pressed }) => [
-        styles.row,
-        { backgroundColor: theme.backgroundElement, borderColor: theme.backgroundSelected },
-        pressed && { backgroundColor: theme.backgroundSelected },
-      ]}>
-      <View style={styles.rowMain}>
-        <ThemedText type="smallBold" numberOfLines={1} style={styles.rowTitle}>
-          {note.title.trim() || 'New Note'}
-        </ThemedText>
-        <View style={styles.rowSubtitle}>
-          <ThemedText type="small" themeColor="textSecondary">
-            {formatWhen(note.updatedAt)}
-          </ThemedText>
-          <ThemedText type="small" themeColor="textSecondary" numberOfLines={1} style={styles.preview}>
-            {preview}
-          </ThemedText>
-        </View>
-      </View>
-      <View style={styles.badges}>
-        {pinned && <Ionicons name="pin" size={14} color={theme.accent} />}
-        {updated && (
-          <View style={[styles.updatedDot, { backgroundColor: theme.accent }]}>
-            <Ionicons name="sparkles" size={11} color={theme.onAccent} />
-          </View>
-        )}
-        {note.isShared && <Ionicons name="people" size={16} color={theme.textSecondary} />}
-        {locked && (
-          <Ionicons
-            name={note.lockType === 'biometric' ? 'finger-print' : 'lock-closed'}
-            size={16}
-            color={theme.accent}
-          />
-        )}
-      </View>
-      </Pressable>
-    </ReanimatedSwipeable>
-  );
-}
-
-function formatWhen(ts: number): string {
-  const d = new Date(ts);
-  const today = new Date();
-  const sameDay = d.toDateString() === today.toDateString();
-  if (sameDay) {
-    return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-  }
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 const styles = StyleSheet.create({

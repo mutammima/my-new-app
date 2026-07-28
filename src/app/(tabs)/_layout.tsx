@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 
+import { useNotes } from '@/context/notes-context';
 import { useTheme } from '@/hooks/use-theme';
 
 /**
@@ -9,6 +10,7 @@ import { useTheme } from '@/hooks/use-theme';
  */
 export default function TabsLayout() {
   const theme = useTheme();
+  const { unseenSharedCount } = useNotes();
 
   return (
     <Tabs
@@ -34,6 +36,10 @@ export default function TabsLayout() {
         name="shared"
         options={{
           title: 'Shared',
+          // Only your partner's changes badge this — your own edits mark
+          // themselves seen as you make them.
+          tabBarBadge: unseenSharedCount > 0 ? unseenSharedCount : undefined,
+          tabBarBadgeStyle: { backgroundColor: theme.accent, color: theme.onAccent },
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="heart-outline" size={size} color={color} />
           ),
