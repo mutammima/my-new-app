@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -46,13 +46,14 @@ export function PromptModal({
   onCancel: () => void;
 }) {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onCancel}>
       <ThemedView style={styles.modal}>
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <SafeAreaView style={styles.body}>
-            <View style={styles.header}>
+          <View style={[styles.body, { paddingTop: insets.top }]}>
+            <View style={[styles.header, { top: insets.top + Spacing.two }]}>
               <Pressable onPress={onCancel} hitSlop={12}>
                 <ThemedText type="link" style={{ color: theme.accent }}>
                   Cancel
@@ -94,7 +95,7 @@ export function PromptModal({
               ]}>
               <ThemedText style={styles.submitText}>{submitting ? savingLabel : submitLabel}</ThemedText>
             </Pressable>
-          </SafeAreaView>
+          </View>
         </KeyboardAvoidingView>
       </ThemedView>
     </Modal>
@@ -111,7 +112,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: Spacing.three,
   },
-  header: { position: 'absolute', top: Spacing.four, left: Spacing.four },
+  // `top` is supplied inline from the live safe-area inset — a fixed value
+  // collides with the status bar / Dynamic Island inside a modal.
+  header: { position: 'absolute', left: Spacing.four },
   center: { textAlign: 'center' },
   input: {
     alignSelf: 'stretch',

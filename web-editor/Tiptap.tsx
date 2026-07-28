@@ -4,6 +4,7 @@ import React from 'react';
 
 import { TenTapStartKit, useTenTap } from '@10play/tentap-editor/web';
 
+import { CaretBridge } from './caret-bridge';
 import { DrawingBridge } from './drawing-bridge';
 
 /**
@@ -13,7 +14,7 @@ import { DrawingBridge } from './drawing-bridge';
  * so every bridge here must ALSO be passed to `useEditorBridge({
  * bridgeExtensions })` natively or `useTenTap` drops it.
  */
-const bridges = [...TenTapStartKit, DrawingBridge].filter(
+const bridges = [...TenTapStartKit, DrawingBridge, CaretBridge].filter(
   (e) => !window.whiteListBridgeExtensions || window.whiteListBridgeExtensions.includes(e.name),
 );
 

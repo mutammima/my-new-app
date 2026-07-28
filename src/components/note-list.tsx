@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
+import { NoteRow } from '@/components/note-row';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -33,16 +33,24 @@ export function NoteList({
 }) {
   const theme = useTheme();
   const [query, setQuery] = useState('');
+  const { isPinned } = useNotes();
+
+  // Pinned notes float to the top; within each group the caller's existing
+  // most-recent-first order is preserved (`sort` is stable in JS).
+  const ordered = useMemo(
+    () => [...notes].sort((a, b) => Number(isPinned(b.id)) - Number(isPinned(a.id))),
+    [notes, isPinned],
+  );
 
   // Plain-text extraction only needs to re-run when the notes themselves
   // change, not on every keystroke — filtering against the cached lowercase
   // text below is a cheap string scan either way.
-  const searchIndex = useMemo(() => buildSearchIndex(notes), [notes]);
+  const searchIndex = useMemo(() => buildSearchIndex(ordered), [ordered]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return notes;
+    if (!q) return ordered;
     return searchIndex.filter((s) => s.titleLower.includes(q) || s.bodyLower.includes(q)).map((s) => s.note);
-  }, [searchIndex, query, notes]);
+  }, [searchIndex, query, ordered]);
 
   if (notes.length === 0) {
     return <EmptyState icon={emptyIcon} theme={theme} text={emptyLabel} />;
@@ -110,77 +118,18 @@ function EmptyState({
   );
 }
 
-function NoteRow({ note }: { note: Note }) {
-  const theme = useTheme();
-  const router = useRouter();
-  const { deleteNote, isUnseen } = useNotes();
-  const locked = note.lockType !== 'none';
-  const updated = isUnseen(note);
-
-  function confirmDelete() {
-    Alert.alert('Delete note?', 'This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => deleteNote(note.id) },
-    ]);
-  }
-
-  const preview = locked
-    ? 'Locked — tap to unlock'
-    : htmlToPlain(note.body) || 'No additional text';
-
-  return (
-    <Pressable
-      onPress={() => router.push({ pathname: '/note/[id]', params: { id: note.id } })}
-      onLongPress={confirmDelete}
-      delayLongPress={400}
-      style={({ pressed }) => [
-        styles.row,
-        { backgroundColor: theme.backgroundElement, borderColor: theme.backgroundSelected },
-        pressed && { backgroundColor: theme.backgroundSelected },
-      ]}>
-      <View style={styles.rowMain}>
-        <ThemedText type="smallBold" numberOfLines={1} style={styles.rowTitle}>
-          {note.title.trim() || 'New Note'}
-        </ThemedText>
-        <View style={styles.rowSubtitle}>
-          <ThemedText type="small" themeColor="textSecondary">
-            {formatWhen(note.updatedAt)}
-          </ThemedText>
-          <ThemedText type="small" themeColor="textSecondary" numberOfLines={1} style={styles.preview}>
-            {preview}
-          </ThemedText>
-        </View>
-      </View>
-      <View style={styles.badges}>
-        {updated && (
-          <View style={[styles.updatedDot, { backgroundColor: theme.accent }]}>
-            <Ionicons name="sparkles" size={11} color={theme.onAccent} />
-          </View>
-        )}
-        {note.isShared && <Ionicons name="people" size={16} color={theme.textSecondary} />}
-        {locked && (
-          <Ionicons
-            name={note.lockType === 'biometric' ? 'finger-print' : 'lock-closed'}
-            size={16}
-            color={theme.accent}
-          />
-        )}
-      </View>
-    </Pressable>
-  );
-}
-
-function formatWhen(ts: number): string {
-  const d = new Date(ts);
-  const today = new Date();
-  const sameDay = d.toDateString() === today.toDateString();
-  if (sameDay) {
-    return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-  }
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
 const styles = StyleSheet.create({
+  actions: { flexDirection: 'row', alignItems: 'stretch', marginBottom: Spacing.two },
+  action: {
+    width: 74,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    borderRadius: Spacing.three,
+    marginLeft: Spacing.two,
+  },
+  deleteAction: { backgroundColor: '#E5484D' },
+  deleteLabel: { color: '#fff' },
   searchRow: { paddingHorizontal: Spacing.four, paddingBottom: Spacing.three },
   searchBar: {
     flexDirection: 'row',

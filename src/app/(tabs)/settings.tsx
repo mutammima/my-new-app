@@ -5,10 +5,11 @@ import { Alert, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-na
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PinModal } from '@/components/pin-modal';
+import { HueWheel } from '@/components/hue-wheel';
 import { PromptModal } from '@/components/prompt-modal';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { ACCENT_LABELS, ACCENTS, type AccentKey, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
 import { useAppLock } from '@/context/app-lock-context';
 import { useAuth } from '@/context/auth-context';
 import { type ThemePreference, useThemePreference } from '@/context/theme-context';
@@ -18,7 +19,7 @@ import { clearPin, getBiometricStatus, isPinSet, setPin, type BiometricStatus } 
 export default function SettingsScreen() {
   const theme = useTheme();
   const { user, signOut, linkPartner, updateName } = useAuth();
-  const { preference, setPreference, accent, setAccent } = useThemePreference();
+  const { preference, setPreference, accentHue, setAccentHue } = useThemePreference();
   const { enabled: appLockEnabled, setEnabled: setAppLockEnabled } = useAppLock();
 
   const [pinSet, setPinSet] = useState(false);
@@ -166,25 +167,7 @@ export default function SettingsScreen() {
               })}
             </View>
             <View style={[styles.swatchDivider, { backgroundColor: theme.background }]} />
-            <View style={styles.swatchRow}>
-              {(Object.keys(ACCENTS) as AccentKey[]).map((key) => {
-                const active = accent === key;
-                return (
-                  <Pressable key={key} onPress={() => setAccent(key)} style={styles.swatchWrap}>
-                    <View
-                      style={[
-                        styles.swatch,
-                        { backgroundColor: ACCENTS[key], borderColor: active ? theme.text : 'transparent' },
-                      ]}>
-                      {active && <Ionicons name="checkmark" size={18} color="#fff" />}
-                    </View>
-                    <ThemedText type="small" themeColor="textSecondary">
-                      {ACCENT_LABELS[key]}
-                    </ThemedText>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <HueWheel hue={accentHue} onChange={setAccentHue} />
           </Section>
 
           <Section title="Security">

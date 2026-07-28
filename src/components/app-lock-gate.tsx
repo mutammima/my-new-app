@@ -41,10 +41,22 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
       setForeground(next === 'active');
-      // 'inactive' fires before 'background' and before iOS snapshots the app
-      // switcher, so re-locking here is what gets the cover up in time.
-      if (next !== 'active' && armed) setLocked(true);
-      if (next === 'background') setPromptToken((t) => t + 1);
+      // Re-lock on 'background' ONLY — never on 'inactive'.
+      //
+      // This used to fire on any non-'active' state, to try to raise the cover
+      // before iOS snapshots the app switcher. That job now belongs to the
+      // native privacy cover (src/lib/privacy-screen.ts), which is actually
+      // fast enough to do it; JS never reliably was.
+      //
+      // Keeping 'inactive' here was also actively harmful: the system Face ID
+      // sheet itself drives the app 'inactive', so authenticating re-locked
+      // the very thing being unlocked, and the two gates then re-triggered
+      // each other — the "can't unlock it at all" bug. 'background' means the
+      // user genuinely left, which is exactly when re-auth should be required.
+      if (next === 'background' && armed) {
+        setLocked(true);
+        setPromptToken((t) => t + 1);
+      }
     });
     return () => sub.remove();
   }, [armed]);

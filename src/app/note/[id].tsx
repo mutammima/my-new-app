@@ -4,15 +4,19 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, AppState, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ConfirmModal } from '@/components/confirm-modal';
 import { LinkPartnerSheet } from '@/components/link-partner-sheet';
 import { PinModal } from '@/components/pin-modal';
 import { RichNoteEditor } from '@/components/rich-note-editor';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { accentFromHue, Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useNotes } from '@/context/notes-context';
+import { useAccentHue } from '@/context/theme-context';
+import { useNotePresence } from '@/hooks/use-note-presence';
 import { useTheme } from '@/hooks/use-theme';
+import { setLockedNotePrivacy } from '@/lib/privacy-screen';
 import {
   authenticateBiometric,
   getBiometricStatus,
@@ -38,6 +42,9 @@ export default function NoteEditorScreen() {
   const [pinTask, setPinTask] = useState<'unlock' | 'enable' | null>(null);
   // Invite/link-partner sheet, opened when you share without a partner linked.
   const [showLink, setShowLink] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const myHue = useAccentHue();
+  const partnerHere = useNotePresence(note?.isShared ? id : undefined, myHue);
 
   const locked = note ? note.lockType !== 'none' : false;
 
@@ -64,21 +71,37 @@ export default function NoteEditorScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note?.id]);
 
-  // Once unlocked, `unlocked` stayed true for the rest of this screen's
-  // lifetime — so if you background the app WHILE a locked note is open (the
-  // common case: you unlocked it, then swiped to the app switcher), its real
-  // content stayed on screen and iOS's switcher snapshot captured it in
-  // plaintext. Re-lock immediately on 'inactive' (which fires before
-  // 'background' and before that snapshot is taken — same reasoning as
-  // AppLockGate) so a locked note is NEVER what's visible when you swipe out,
-  // independent of whether the separate whole-app App Lock setting is on.
+  // Re-lock when the user genuinely leaves the app — 'background', never
+  // 'inactive'.
+  //
+  // This deliberately no longer tries to also be the app-switcher cover. The
+  // previous version fired on any non-'active' state to beat the snapshot, but
+  // the system Face ID sheet ALSO makes the app 'inactive': unlocking the note
+  // immediately re-locked it, and combined with the whole-app gate the two
+  // could bounce off each other so the note could never be opened at all.
+  // Hiding the content from the switcher is now the native privacy cover's job
+  // (src/lib/privacy-screen.ts), which is race-free; this listener is purely
+  // about *authorization*, so 'background' is the correct — and safe — signal.
   useEffect(() => {
     if (!locked) return;
     const sub = AppState.addEventListener('change', (next) => {
-      if (next !== 'active') setUnlocked(false);
+      if (next === 'background') setUnlocked(false);
     });
     return () => sub.remove();
   }, [locked]);
+
+  // While a locked note is actually readable on screen, harden the window
+  // itself: this is the layer that covers a *presented* screen (note/[id] is a
+  // native modal, which the app-switcher blur alone slides underneath), and it
+  // also keeps locked content out of screenshots. Released as soon as the note
+  // closes or re-locks, so ordinary screens stay screenshot-able.
+  useEffect(() => {
+    const shouldHarden = locked && unlocked;
+    setLockedNotePrivacy(shouldHarden);
+    return () => {
+      if (shouldHarden) setLockedNotePrivacy(false);
+    };
+  }, [locked, unlocked]);
 
   // The OTHER half of "re-lock when I leave" — navigating back to the list —
   // is already covered without extra code: `note/[id]` is pushed as a modal
@@ -115,18 +138,43 @@ export default function NoteEditorScreen() {
   // Flush any pending edit when leaving the screen.
   useEffect(() => flush, [flush]);
 
+  // Set once the user actively dismisses a biometric prompt, so we never
+  // re-prompt them in a loop they can't escape. Cleared when they ask again.
+  const declinedRef = useRef(false);
+
   const tryBiometric = useCallback(async () => {
+    declinedRef.current = false;
     const ok = await authenticateBiometric('Unlock this note');
     if (ok) setUnlocked(true);
+    else declinedRef.current = true;
   }, []);
 
-  // Auto-prompt biometrics as soon as a biometric-locked note opens.
+  // Counts genuine returns from the background, so a re-locked note can
+  // re-prompt. Keyed on 'background' (not 'inactive') for the same reason as
+  // the re-lock above: the Face ID sheet itself makes the app 'inactive', and
+  // treating that as a return would re-prompt on top of the live prompt.
+  const [resumeToken, setResumeToken] = useState(0);
   useEffect(() => {
-    if (note && note.lockType === 'biometric' && !unlocked) {
+    let wasBackgrounded = false;
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'background') wasBackgrounded = true;
+      else if (next === 'active' && wasBackgrounded) {
+        wasBackgrounded = false;
+        setResumeToken((t) => t + 1);
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  // Auto-prompt biometrics when a biometric-locked note opens, and again after
+  // a real return from the background — but never after the user declined,
+  // which is what would otherwise make the prompt impossible to dismiss.
+  useEffect(() => {
+    if (note?.lockType === 'biometric' && !unlocked && !declinedRef.current) {
       tryBiometric();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [note?.id]);
+  }, [note?.id, resumeToken]);
 
   // `note` is narrowed to non-null below. These handlers are `const` arrows (not
   // hoisted `function` declarations) so the narrowing flows into their closures.
@@ -193,19 +241,7 @@ export default function NoteEditorScreen() {
     Alert.alert('Lock note', 'Keep this note hidden until it is unlocked.', options);
   };
 
-  const confirmDelete = () => {
-    Alert.alert('Delete note?', 'This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          await deleteNote(activeNote.id);
-          router.back();
-        },
-      },
-    ]);
-  };
+  const confirmDelete = () => setDeleting(true);
 
   const onPinModalSubmit = async (pin: string): Promise<boolean> => {
     if (pinTask === 'unlock') {
@@ -283,6 +319,17 @@ export default function NoteEditorScreen() {
                   </ThemedText>
                 </View>
               )}
+              {partnerHere && (
+                // Their theme colour, not yours — so it reads as "them".
+                <View style={styles.sharedBanner}>
+                  <View
+                    style={[styles.presenceDot, { backgroundColor: accentFromHue(partnerHere.hue) }]}
+                  />
+                  <ThemedText type="small" style={{ color: accentFromHue(partnerHere.hue) }}>
+                    {partnerHere.name} is viewing this note
+                  </ThemedText>
+                </View>
+              )}
             </View>
           </RichNoteEditor>
         )}
@@ -294,6 +341,19 @@ export default function NoteEditorScreen() {
         title={pinTask === 'enable' ? 'Set a PIN' : 'Enter your PIN'}
         onSubmit={onPinModalSubmit}
         onCancel={() => setPinTask(null)}
+      />
+
+      <ConfirmModal
+        visible={deleting}
+        title="Delete note?"
+        message="This cannot be undone."
+        confirmLabel="Delete"
+        onCancel={() => setDeleting(false)}
+        onConfirm={async () => {
+          setDeleting(false);
+          await deleteNote(activeNote.id);
+          router.back();
+        }}
       />
 
       <LinkPartnerSheet
@@ -362,6 +422,7 @@ const styles = StyleSheet.create({
   editorHead: { paddingHorizontal: Spacing.four, paddingTop: Spacing.two, gap: Spacing.two },
   titleInput: { fontSize: 26, fontWeight: '700', paddingTop: Spacing.two },
   sharedBanner: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+  presenceDot: { width: 8, height: 8, borderRadius: 4 },
   gate: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.two, padding: Spacing.four },
   gateText: { textAlign: 'center' },
   unlockButton: {

@@ -4,11 +4,9 @@ import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Keyboard, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import type { WebViewMessageEvent } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
-  CoreEditorActionType,
   defaultEditorTheme,
   RichText,
   TenTapStartKit,
@@ -19,9 +17,13 @@ import {
 
 import { DrawingCanvas } from '@/components/drawing-canvas';
 import { Spacing } from '@/constants/theme';
+import { CaretBridge, onCaret } from '@/lib/caret-bridge';
 import { DrawingBridge } from '@/lib/drawing-bridge';
 import { editorHtml } from '@/lib/editor-html';
 import { useTheme } from '@/hooks/use-theme';
+
+/** Breathing room kept between the caret and the edge of the visible band. */
+const CARET_MARGIN = 24;
 
 /**
  * True WYSIWYG note body: a TipTap rich-text editor running in a WebView, so
@@ -156,7 +158,15 @@ export function RichNoteEditor({
 
   const editor = useEditorBridge({
     autofocus: false,
-    avoidIosKeyboard: true,
+    // Deliberately OFF. On iOS this makes tentap inject an inline
+    // `padding-bottom: keyboardHeight + 10` onto `.ProseMirror`, which is
+    // included in the border-box height it reports back as `document-height`.
+    // With `dynamicHeight` that inflated number becomes the WebView's height,
+    // so opening the keyboard silently grew the content by a whole keyboard —
+    // which is what made the page lurch far past the text on every new line.
+    // Keeping the caret visible is handled properly by CaretBridge below, and
+    // the keyboard's own space is accounted for by the ScrollView's padding.
+    avoidIosKeyboard: false,
     // Size the WebView to its real content height instead of flex-filling the
     // screen, so it has nothing left to scroll internally — the outer
     // ScrollView below becomes the ONE scroll container for Title+banner+body,
@@ -173,9 +183,9 @@ export function RichNoteEditor({
     customSource: editorHtml,
     // MUST mirror the bundle's bridge list (web-editor/Tiptap.tsx). tentap
     // builds `whiteListBridgeExtensions` from these names and the web side
-    // filters on it, so omitting DrawingBridge here makes the `drawing` node
-    // unknown in the editor — it would be stripped on load and autosaved away.
-    bridgeExtensions: [...TenTapStartKit, DrawingBridge],
+    // filters on it, so omitting a bridge here makes its node/plugin unknown
+    // in the editor — a `drawing` would be stripped on load and autosaved away.
+    bridgeExtensions: [...TenTapStartKit, DrawingBridge, CaretBridge],
   });
 
   const content = useEditorContent(editor, { type: 'html', debounceInterval: 500 });
@@ -256,44 +266,47 @@ export function RichNoteEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [theme.background, theme.text, theme.accent, theme.textSecondary, theme.backgroundElement, theme.backgroundSelected]);
 
-  // `dynamicHeight` (above) removes the WebView's own internal scroll, which
-  // is what tentap's `avoidIosKeyboard` normally relies on to keep the typing
-  // caret visible above the keyboard — with nothing scrollable left inside
-  // the document, that mechanism goes inert. This covers the common case
-  // (typing at the end of the note): whenever the editor's real content
-  // height changes while the keyboard is up, follow it to the bottom of the
-  // real content. Precise mid-document caret-following would need a
-  // dedicated caret-position bridge — not built yet; see if this heuristic
-  // proves sufficient on a real device first.
-  const handleRichTextMessage = (event: WebViewMessageEvent) => {
-    if (typeof event.nativeEvent.data !== 'string') return;
-    let message: { type?: string; payload?: unknown } = {};
-    try {
-      message = JSON.parse(event.nativeEvent.data);
-    } catch {
-      return;
-    }
-    if (
-      message.type === CoreEditorActionType.DocumentHeight &&
-      typeof message.payload === 'number' &&
-      keyboardHeight > 0 &&
-      !showDrawing
-    ) {
-      // `scrollToEnd()` was the original fix here, but it scrolls to the end
-      // of the ScrollView's FULL content — including the keyboard-avoidance
-      // padding below the real editor (contentContainerStyle's
-      // paddingBottom, easily 300-450pt). That overshoots PAST the actual
-      // last line of text into blank space, leaving the line you just typed
-      // sitting near the TOP of the visible area instead of just above the
-      // keyboard. Scroll only far enough to reveal the real content's bottom
-      // edge (headerHeight + editorHeight) within the space actually visible
-      // above the keyboard/toolbar — never into the padding.
-      const editorHeight = message.payload;
+  // Keep the caret visible above the keyboard.
+  //
+  // Previous attempts keyed off the editor's CONTENT HEIGHT and scrolled to
+  // the bottom of the document. That was wrong twice over: pressing Enter
+  // mid-note grows the document, so it yanked the view to the very end,
+  // far away from where the user was actually typing — the reported "text
+  // goes off the screen" — and the supposedly-bounded target it computed was
+  // algebraically identical to plain `scrollToEnd()`, so replacing one with
+  // the other changed nothing at all.
+  //
+  // The document's height simply doesn't say where the caret is. CaretBridge
+  // reports the caret's real on-screen rect instead, and only when the editor
+  // actually wants it revealed. We then nudge — never jump — by the minimum
+  // needed to bring it inside the band that isn't covered by the keyboard.
+  const scrollYRef = useRef(0);
+  useEffect(() => {
+    return onCaret(({ top, bottom }) => {
+      if (showDrawing) return;
       const visibleHeight = scrollViewHeight - keyboardHeight - toolbarHeight;
-      const targetY = Math.max(0, headerHeight + editorHeight - visibleHeight);
-      scrollRef.current?.scrollTo({ y: targetY, animated: true });
-    }
-  };
+      if (visibleHeight <= 0) return;
+
+      // The WebView starts at `headerHeight` within the scroll content, and
+      // the caret rect is relative to the WebView's own viewport.
+      const caretTop = headerHeight + top;
+      const caretBottom = headerHeight + bottom;
+      const bandTop = scrollYRef.current;
+      const bandBottom = bandTop + visibleHeight;
+
+      let targetY: number | null = null;
+      if (caretBottom > bandBottom - CARET_MARGIN) {
+        targetY = caretBottom - visibleHeight + CARET_MARGIN;
+      } else if (caretTop < bandTop + CARET_MARGIN) {
+        targetY = caretTop - CARET_MARGIN;
+      }
+      // Already comfortably visible — leave the scroll position alone. This is
+      // what stops ordinary typing from moving the page around at all.
+      if (targetY === null) return;
+
+      scrollRef.current?.scrollTo({ y: Math.max(0, targetY), animated: true });
+    });
+  }, [showDrawing, scrollViewHeight, keyboardHeight, toolbarHeight, headerHeight]);
 
   async function pickImage() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -320,6 +333,13 @@ export function RichNoteEditor({
         ref={scrollRef}
         style={styles.flex}
         onLayout={(e) => setScrollViewHeight(e.nativeEvent.layout.height)}
+        onScroll={(e) => {
+          scrollYRef.current = e.nativeEvent.contentOffset.y;
+        }}
+        scrollEventThrottle={16}
+        // Leaves room to scroll the true end of the note clear of the keyboard
+        // and toolbar, so the last lines are always reachable rather than
+        // stranded underneath them.
         contentContainerStyle={{ paddingBottom: showDrawing ? 0 : keyboardHeight + toolbarHeight }}
         // Apple Notes locks the page while its markup tool is active; this
         // also keeps the scroll offset stable for the duration of a sketch,
@@ -327,19 +347,13 @@ export function RichNoteEditor({
         // to a document position (see DrawingCanvas/onExit).
         scrollEnabled={!showDrawing}
         keyboardShouldPersistTaps="handled"
+        // We position for the keyboard ourselves (the padding above plus
+        // CaretBridge-driven scrolling); letting UIKit also inset would
+        // double-count and fight those adjustments.
         automaticallyAdjustKeyboardInsets={false}>
         <View onLayout={(e) => setHeaderHeight(e.nativeEvent.layout.height)}>{children}</View>
         <View ref={richTextWrapperRef}>
-          <RichText
-            editor={editor}
-            onMessage={handleRichTextMessage}
-            // RichText's own onMessage handling (which reads the
-            // 'document-height' message to size the WebView for dynamicHeight)
-            // is SKIPPED whenever a custom onMessage is passed, unless this is
-            // explicitly set to false — easy to miss, and silently breaks
-            // dynamicHeight (the WebView would never resize) if forgotten.
-            exclusivelyUseCustomOnMessage={false}
-          />
+          <RichText editor={editor} />
         </View>
       </ScrollView>
       {!showDrawing && (

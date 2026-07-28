@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { NoteList } from '@/components/note-list';
+import { CollectionList } from '@/components/collection-list';
 import { SyncBanner } from '@/components/sync-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -17,7 +17,7 @@ export default function NotesScreen() {
   const router = useRouter();
   const theme = useTheme();
   const { user } = useAuth();
-  const { myNotes, createNote } = useNotes();
+  const { notes: allNotes, myNotes, createNote } = useNotes();
 
   const firstName = (user?.name ?? '').trim().split(' ')[0];
   const greeting = firstName ? pickGreeting(firstName) : 'Your notes';
@@ -44,11 +44,7 @@ export default function NotesScreen() {
 
         <SyncBanner />
 
-        <NoteList
-          notes={myNotes}
-          emptyIcon="heart-outline"
-          emptyLabel={'No notes yet.\nTap the + to write your first one together.'}
-        />
+        <CollectionList notes={allNotes} />
 
         <Pressable
           onPress={onCompose}

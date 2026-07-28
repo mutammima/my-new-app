@@ -18,11 +18,15 @@ export const StorageKeys = {
   profile: 'duonotes.profile', // cached auth profile prefix — `${profile}.${userId}`
   users: 'duonotes.users',
   themePreference: 'duonotes.themePreference', // 'light' | 'dark' | 'system'
-  accentPreference: 'duonotes.accentPreference', // 'rose' | 'coral' | 'lavender' | 'blue'
+  accentPreference: 'duonotes.accentPreference', // LEGACY 'rose'|'coral'|'lavender'|'blue' — migrated to accentHue
+  accentHue: 'duonotes.accentHue', // number 0-360 on the colour wheel
   session: 'duonotes.session', // SecureStore
   pin: 'duonotes.pin', // SecureStore — JSON { salt, hash }
   appLock: 'duonotes.appLock', // AsyncStorage — boolean, gate the whole app behind PIN/biometric
   seen: 'duonotes.seen', // AsyncStorage prefix — `${seen}.${userId}` -> { [noteId]: updatedAt }
+  // Pinned-to-top note ids, per person — a shared note can matter to one
+  // partner and not the other, so this is deliberately not synced.
+  pinned: 'duonotes.pinned', // AsyncStorage prefix — `${pinned}.${userId}` -> { [noteId]: true }
 } as const;
 
 /* ------------------------------- AsyncStorage ------------------------------ */
