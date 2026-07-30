@@ -359,7 +359,19 @@ export function RichNoteEditor({
       {!showDrawing && (
         <View
           onLayout={(e) => setToolbarHeight(e.nativeEvent.layout.height)}
-          style={[styles.toolbar, { bottom: keyboardHeight, paddingBottom: keyboardHeight === 0 ? insets.bottom : 0 }]}>
+          style={[
+            styles.toolbar,
+            {
+              bottom: keyboardHeight,
+              paddingBottom: keyboardHeight === 0 ? insets.bottom : 0,
+              // This container must be filled, not transparent. The
+              // paddingBottom above reserves the home-indicator inset, and
+              // only the rows INSIDE it have their own background — so
+              // without this the reserved strip was see-through and the note
+              // content showed underneath the bar.
+              backgroundColor: theme.backgroundElement,
+            },
+          ]}>
           <View style={[styles.attachRow, { backgroundColor: theme.backgroundElement, borderColor: theme.backgroundSelected }]}>
             <Pressable onPress={pickImage} hitSlop={8} style={styles.attachButton}>
               <Ionicons name="image-outline" size={20} color={theme.text} />
