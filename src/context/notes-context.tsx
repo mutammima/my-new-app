@@ -197,17 +197,60 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
   const reconcile = useCallback(async () => {
     if (!user) return;
     const ids = [user.id, user.partnerId].filter(Boolean) as string[];
-    const { data: profiles } = await supabase.from(TABLES.profiles).select('id, name').in('id', ids);
-    namesRef.current = Object.fromEntries((profiles ?? []).map((p) => [p.id, p.name]));
 
-    const { data, error } = await supabase
+    // Names change approximately never, so only pay for them when one is
+    // actually missing (first load, or a partner who just linked). This used to
+    // run on every single reconcile.
+    if (ids.some((id) => !namesRef.current[id])) {
+      const { data: profiles } = await supabase.from(TABLES.profiles).select('id, name').in('id', ids);
+      namesRef.current = Object.fromEntries((profiles ?? []).map((p) => [p.id, p.name]));
+    }
+
+    // Step 1 — the manifest: ids and timestamps ONLY, no bodies. This is still
+    // the authoritative set of server rows, so anything absent from it is a
+    // delete, exactly as before; it just costs ~40 bytes a note instead of the
+    // entire note. Re-downloading every `body` on a timer is what blew the
+    // egress cap.
+    const { data: manifest, error } = await supabase
       .from(TABLES.notes)
-      .select('id, owner_id, title, body, lock_type, is_shared, updated_at')
+      .select('id, updated_at')
       .order('updated_at', { ascending: false });
-    if (error || !data) throw error ?? new Error('Failed to fetch notes');
+    if (error || !manifest) throw error ?? new Error('Failed to fetch notes');
+    const rows = manifest as { id: string; updated_at: string }[];
 
+    // Step 2 — download bodies only for rows we don't already hold at that
+    // version. In the steady state (nothing changed) this fetches nothing.
+    const localById = new Map(notesRef.current.map((n) => [n.id, n]));
+    const staleIds = rows
+      .filter((r) => {
+        // A note with unpushed local edits is about to win the merge below
+        // regardless, so downloading the server's copy is pure waste — and it
+        // would happen on every poll for as long as you're typing, which is
+        // exactly when polls are firing.
+        if (dirtyRef.current.has(r.id)) return false;
+        const local = localById.get(r.id);
+        return !local || local.updatedAt !== new Date(r.updated_at).getTime();
+      })
+      .map((r) => r.id);
+
+    const fetched = new Map<string, Note>();
+    if (staleIds.length) {
+      const { data, error: bodyError } = await supabase
+        .from(TABLES.notes)
+        .select('id, owner_id, title, body, lock_type, is_shared, updated_at')
+        .in('id', staleIds);
+      if (bodyError || !data) throw bodyError ?? new Error('Failed to fetch notes');
+      for (const row of data as NoteRow[]) fetched.set(row.id, mapRow(row));
+    }
+
+    // Step 3 — rebuild from the manifest, so ordering and deletions still come
+    // from the server. Use the freshly fetched copy where there is one, the
+    // cached copy otherwise.
     const byId = new Map<string, Note>();
-    for (const row of data as NoteRow[]) byId.set(row.id, mapRow(row));
+    for (const r of rows) {
+      const next = fetched.get(r.id) ?? localById.get(r.id);
+      if (next) byId.set(r.id, next);
+    }
     // Local changes that haven't been uploaded yet take precedence.
     for (const id of dirtyRef.current) {
       const local = notesRef.current.find((n) => n.id === id);
@@ -364,13 +407,50 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!uid) return;
 
+    // Realtime can silently go stale (dropped socket, backgrounded app, or the
+    // table simply not in the realtime publication). Two safety nets so a
+    // partner's new note / edit still shows up promptly:
+    //   1. Reconcile the instant we return to the foreground.
+    //   2. While foregrounded, poll as a fallback.
+    //
+    // The interval is self-tuning. This was a flat 8s, which meant the fallback
+    // ran ~10,800 times a day per device even though realtime was connected and
+    // already delivering every change — it did nearly all the egress for none of
+    // the benefit. Now it backs off to insurance cadence once realtime confirms
+    // it's subscribed, and only stays brisk when realtime never lands.
+    const POLL_MS_REALTIME_OK = 10 * 60 * 1000; // 10 min — insurance only
+    const POLL_MS_NO_REALTIME = 60 * 1000; //  1 min — the poll is the sync
+
+    // Whether realtime is actually delivering, which decides which of the two
+    // cadences above applies.
+    let realtimeOk = false;
+    let poll: ReturnType<typeof setInterval> | null = null;
+    const startPolling = () => {
+      if (poll) return;
+      const every = realtimeOk ? POLL_MS_REALTIME_OK : POLL_MS_NO_REALTIME;
+      poll = setInterval(() => reconcileRef.current().catch(() => {}), every);
+    };
+    const stopPolling = () => {
+      if (poll) clearInterval(poll);
+      poll = null;
+    };
+
     const channel = supabase
       .channel('notes-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.notes }, () => {
         // A remote change arrived — pull and merge (keeps local pending edits).
         reconcileRef.current().catch(() => {});
       })
-      .subscribe();
+      .subscribe((status) => {
+        const ok = status === 'SUBSCRIBED';
+        if (ok === realtimeOk) return;
+        realtimeOk = ok;
+        // Re-arm at the interval that now applies.
+        if (AppState.currentState === 'active') {
+          stopPolling();
+          startPolling();
+        }
+      });
 
     const subscription = Network.addNetworkStateListener((state) => {
       const online = !!state.isConnected && state.isInternetReachable !== false;
@@ -381,21 +461,6 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
       if (online && !wasOnline) syncNowRef.current();
     });
 
-    // Realtime can silently go stale (dropped socket, backgrounded app, or the
-    // table simply not in the realtime publication). Two safety nets so a
-    // partner's new note / edit still shows up promptly:
-    //   1. Reconcile the instant we return to the foreground.
-    //   2. While foregrounded, poll on a short interval as a fallback.
-    const POLL_MS = 8000;
-    let poll: ReturnType<typeof setInterval> | null = null;
-    const startPolling = () => {
-      if (poll) return;
-      poll = setInterval(() => reconcileRef.current().catch(() => {}), POLL_MS);
-    };
-    const stopPolling = () => {
-      if (poll) clearInterval(poll);
-      poll = null;
-    };
     const appStateSub = AppState.addEventListener('change', (next) => {
       if (next === 'active') {
         syncNowRef.current();
