@@ -55,6 +55,20 @@ cp -R "$APP" Payload/
 zip -qr "$SCHEME-unsigned.ipa" Payload
 rm -rf Payload
 
+# Drop a copy in the shared sideload folder under a stable name, so each build
+# replaces the previous one instead of accumulating near-identical .ipa files
+# (a stale duplicate there means installing the wrong build).
+#
+# Deliberately NOT in iCloud Drive. That folder used to live under
+# ~/Library/Mobile Documents/…/iOS Apps, and iCloud caused real problems:
+# " 2" conflict copies of the .ipa, and files silently dematerialising into
+# cloud-only placeholders so a plain `cp`/`mv` would fail or stall. ~/Developer
+# is not synced, so what is on disk is simply what is on disk.
+SIDELOAD_DIR="$HOME/Developer/iOS Apps"
+mkdir -p "$SIDELOAD_DIR"
+cp "$SCHEME-unsigned.ipa" "$SIDELOAD_DIR/$SCHEME.ipa"
+
 echo ""
 echo "✅ Done: $(pwd)/$SCHEME-unsigned.ipa"
-echo "   Install it with SideStore, or import it into LiveContainer."
+echo "   Copied to: $SIDELOAD_DIR/$SCHEME.ipa"
+echo "   Import it into LiveContainer (unsigned — iOS cannot install it directly)."
