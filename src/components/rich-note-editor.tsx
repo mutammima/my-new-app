@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { EncodingType, readAsStringAsync } from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Keyboard, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -11,9 +11,11 @@ import {
   RichText,
   TenTapStartKit,
   Toolbar,
+  useBridgeState,
   useEditorBridge,
   useEditorContent,
 } from '@10play/tentap-editor';
+import type { EditorBridge } from '@10play/tentap-editor';
 
 import { DrawingCanvas } from '@/components/drawing-canvas';
 import { Spacing } from '@/constants/theme';
@@ -24,6 +26,15 @@ import { useTheme } from '@/hooks/use-theme';
 
 /** Breathing room kept between the caret and the edge of the visible band. */
 const CARET_MARGIN = 24;
+
+/**
+ * How long to ignore the editor's own content callback after we programmatically
+ * install a partner's revision. `useEditorContent` below is debounced at 500ms,
+ * so one emission lands inside this window — and without the guard we would
+ * persist their text straight back as if it were ours, bumping `updatedAt` and
+ * bouncing the same body between the two phones.
+ */
+const REMOTE_ECHO_MS = 1000;
 
 /**
  * True WYSIWYG note body: a TipTap rich-text editor running in a WebView, so
@@ -40,10 +51,15 @@ const CARET_MARGIN = 24;
 export function RichNoteEditor({
   initialHtml,
   onChangeHtml,
+  remoteHtml,
   children,
 }: {
   initialHtml: string;
   onChangeHtml: (html: string) => void;
+  /** The note body as the sync layer currently holds it. When this differs from
+   *  what the editor is showing AND the caret is elsewhere, the partner's
+   *  revision is installed live. Omit for notes with no second author. */
+  remoteHtml?: string;
   /** Rendered above the note body, INSIDE the same scrollable region — so it
    *  scrolls away with the body instead of staying pinned (e.g. the note's
    *  Title input + shared banner, owned by the screen that renders us). */
@@ -189,10 +205,27 @@ export function RichNoteEditor({
   });
 
   const content = useEditorContent(editor, { type: 'html', debounceInterval: 500 });
+
+  // Set when we install a partner's revision; see REMOTE_ECHO_MS.
+  const echoUntilRef = useRef(0);
+
   useEffect(() => {
-    if (content !== undefined) onChangeHtml(content);
+    if (content === undefined) return;
+    // Their text, echoing back at us. Dropping it here is what keeps a partner's
+    // edit from being re-saved under our name.
+    if (Date.now() < echoUntilRef.current) return;
+    onChangeHtml(content);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content]);
+
+  // Stable, and they only touch a ref — so RemoteRevision below can call them
+  // without ever re-rendering this component.
+  const holdEcho = useCallback(() => {
+    echoUntilRef.current = Date.now() + REMOTE_ECHO_MS;
+  }, []);
+  const releaseEcho = useCallback(() => {
+    echoUntilRef.current = 0;
+  }, []);
 
   // Re-inject whenever the theme changes (initial load, or a live Settings toggle).
   // `onLoad` on the underlying WebView is not a reliable "ready" signal here — it
@@ -329,6 +362,15 @@ export function RichNoteEditor({
 
   return (
     <View style={styles.flex} ref={rootRef}>
+      {remoteHtml !== undefined && (
+        <RemoteRevision
+          editor={editor}
+          remoteHtml={remoteHtml}
+          shownHtml={content}
+          onInstall={holdEcho}
+          onFocus={releaseEcho}
+        />
+      )}
       <ScrollView
         ref={scrollRef}
         style={styles.flex}
@@ -406,6 +448,62 @@ export function RichNoteEditor({
       )}
     </View>
   );
+}
+
+/**
+ * Installs a partner's revision into the editor — and nothing else.
+ *
+ * Editing the same note at the same instant is still last-write-wins; this is
+ * presence-grade collaboration, not a CRDT. What it fixes is the case that
+ * actually happens: one of you writes while the other is reading, and the
+ * reader used to see nothing at all until they closed and reopened the note.
+ *
+ * It exists as a separate null-rendering component purely for performance.
+ * `useBridgeState` re-renders its caller on EVERY editor state update — that is
+ * once per keystroke and once per selection change. Quarantined here, that churn
+ * never reaches the scroll container, the toolbar, or the note title above them.
+ */
+function RemoteRevision({
+  editor,
+  remoteHtml,
+  shownHtml,
+  onInstall,
+  onFocus,
+}: {
+  editor: EditorBridge;
+  remoteHtml: string;
+  /** What the editor last reported it is displaying; undefined until ready. */
+  shownHtml: string | undefined;
+  onInstall: () => void;
+  onFocus: () => void;
+}) {
+  const state = useBridgeState(editor);
+  // The last revision we pushed in. TipTap normalises HTML on the way through,
+  // so what comes back out is not byte-identical to what went in — without this
+  // the "already on screen?" test below would keep failing and reinstall the
+  // same revision in a loop.
+  const appliedRef = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (state.isFocused) onFocus();
+  }, [state.isFocused, onFocus]);
+
+  useEffect(() => {
+    // Nothing to compare against yet — the editor's own initialContent stands.
+    if (shownHtml === undefined) return;
+    // Never over a live caret.
+    if (!state.isReady || state.isFocused) return;
+    // Already on screen. This is the common case, because our OWN edits come
+    // back around through the sync layer as `remoteHtml` too.
+    if (remoteHtml === shownHtml) return;
+    if (remoteHtml === appliedRef.current) return;
+
+    appliedRef.current = remoteHtml;
+    onInstall();
+    editor.setContent(remoteHtml);
+  }, [remoteHtml, shownHtml, state.isReady, state.isFocused, editor, onInstall]);
+
+  return null;
 }
 
 const styles = StyleSheet.create({
