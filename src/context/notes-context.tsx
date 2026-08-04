@@ -73,6 +73,7 @@ async function probeOnline(): Promise<boolean> {
 export function NotesProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const uid = user?.id ?? null;
+  const partnerId = user?.partnerId ?? null;
 
   const [notes, setNotesState] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
@@ -234,11 +235,17 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
       .map((r) => r.id);
 
     const fetched = new Map<string, Note>();
-    if (staleIds.length) {
+    // `.in()` serialises every id into the request URI, and the id list is
+    // longest in exactly the case that must not fail: a cold start, where
+    // nothing is cached so every row is stale. Left unchunked, a large enough
+    // library produces a request line the proxy rejects, reconcile throws, and
+    // the cache can never warm up — permanently stuck at zero notes. Chunk it.
+    const CHUNK = 100;
+    for (let i = 0; i < staleIds.length; i += CHUNK) {
       const { data, error: bodyError } = await supabase
         .from(TABLES.notes)
         .select('id, owner_id, title, body, lock_type, is_shared, updated_at')
-        .in('id', staleIds);
+        .in('id', staleIds.slice(i, i + CHUNK));
       if (bodyError || !data) throw bodyError ?? new Error('Failed to fetch notes');
       for (const row of data as NoteRow[]) fetched.set(row.id, mapRow(row));
     }
@@ -424,9 +431,16 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
     // Whether realtime is actually delivering, which decides which of the two
     // cadences above applies.
     let realtimeOk = false;
+    // Cleared by this effect's cleanup. The subscribe() status callback is async
+    // and can fire *after* teardown — removeChannel() itself pushes a CLOSED
+    // status — and that callback re-arms the poll. Without this guard every
+    // sign-out or uid change leaks a live 60s reconcile interval that nothing
+    // holds a handle to any more, so it can never be cleared: an egress leak in
+    // the very code meant to stop one.
+    let alive = true;
     let poll: ReturnType<typeof setInterval> | null = null;
     const startPolling = () => {
-      if (poll) return;
+      if (poll || !alive) return;
       const every = realtimeOk ? POLL_MS_REALTIME_OK : POLL_MS_NO_REALTIME;
       poll = setInterval(() => reconcileRef.current().catch(() => {}), every);
     };
@@ -442,9 +456,17 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
         reconcileRef.current().catch(() => {});
       })
       .subscribe((status) => {
+        if (!alive) return;
         const ok = status === 'SUBSCRIBED';
         if (ok === realtimeOk) return;
         realtimeOk = ok;
+        // Either edge is evidence of a delivery gap. postgres_changes is never
+        // replayed, so anything that changed while the channel was down was not
+        // delivered and never will be. Catch up immediately instead of waiting
+        // out the fallback tick — on the ok=true edge we are about to stretch
+        // that tick to 10 minutes at the exact moment we have proof something
+        // was missed.
+        reconcileRef.current().catch(() => {});
         // Re-arm at the interval that now applies.
         if (AppState.currentState === 'active') {
           stopPolling();
@@ -472,12 +494,25 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
     if (AppState.currentState === 'active') startPolling();
 
     return () => {
+      alive = false;
       supabase.removeChannel(channel);
       subscription.remove();
       appStateSub.remove();
       stopPolling();
     };
   }, [uid]);
+
+  // Linking a partner writes only to the profiles table, so the notes realtime
+  // channel sees nothing, and both effects above are keyed on [uid] alone — so
+  // neither re-runs. The flat 8s poll used to paper over this; now that the poll
+  // backs off to 10 minutes, the partner's already-existing shared notes would
+  // sit invisible for that long after linking, which reads as "sharing is
+  // broken". Costs one extra manifest fetch on launches where a partner is
+  // already linked, which is ids-and-timestamps only.
+  useEffect(() => {
+    if (!uid || !partnerId) return;
+    syncNowRef.current();
+  }, [uid, partnerId]);
 
   const getNote = useCallback((id: string) => notes.find((n) => n.id === id), [notes]);
 
