@@ -26,6 +26,14 @@ import {
 } from '@/lib/security';
 import type { LockType } from '@/lib/types';
 
+/**
+ * How long after a local title keystroke we refuse to adopt the synced title.
+ * Comfortably longer than the 300ms save debounce plus the round trip back
+ * through the notes context, so our own in-flight edit is never mistaken for a
+ * partner's and reverted.
+ */
+const TITLE_ADOPT_GRACE_MS = 1500;
+
 export default function NoteEditorScreen() {
   const theme = useTheme();
   const router = useRouter();
@@ -43,8 +51,12 @@ export default function NoteEditorScreen() {
   // Invite/link-partner sheet, opened when you share without a partner linked.
   const [showLink, setShowLink] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [titleFocused, setTitleFocused] = useState(false);
   const myHue = useAccentHue();
-  const partnerHere = useNotePresence(note?.isShared ? id : undefined, myHue);
+  const { partner: partnerHere, reportTyping } = useNotePresence(
+    note?.isShared ? id : undefined,
+    myHue,
+  );
 
   const locked = note ? note.lockType !== 'none' : false;
 
@@ -62,6 +74,10 @@ export default function NoteEditorScreen() {
 
   // Sync local fields when a (different) note becomes available. Keyed on the
   // id only, so realtime refreshes of the same note never clobber typing.
+  //
+  // The BODY is separately kept live by RichNoteEditor's `remoteHtml`, which
+  // installs a partner's revision whenever the caret is elsewhere. `body` here
+  // stays the local mirror used for saving.
   useEffect(() => {
     if (note) {
       setTitle(note.title);
@@ -138,6 +154,25 @@ export default function NoteEditorScreen() {
   // Flush any pending edit when leaving the screen.
   useEffect(() => flush, [flush]);
 
+  // Adopt the partner's title, under the same rule as the body: never over a
+  // field you are in.
+  //
+  // The extra guards exist because a stale `note.title` is ambiguous — it looks
+  // identical whether the partner hasn't typed or OUR OWN save simply hasn't
+  // landed yet, and adopting in the second case would silently eat what we just
+  // typed. `pending` covers the window before the debounce fires; the grace
+  // period covers the render or two between `updateNote` and `note` coming back
+  // holding our value.
+  const lastTitleEditRef = useRef(0);
+  useEffect(() => {
+    if (!note || titleFocused) return;
+    if (note.title === title) return;
+    if (pending.current.title !== undefined) return;
+    if (Date.now() - lastTitleEditRef.current < TITLE_ADOPT_GRACE_MS) return;
+    setTitle(note.title);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note?.title, titleFocused]);
+
   // Set once the user actively dismisses a biometric prompt, so we never
   // re-prompt them in a loop they can't escape. Cleared when they ask again.
   const declinedRef = useRef(false);
@@ -184,6 +219,7 @@ export default function NoteEditorScreen() {
   const changeBody = (t: string) => {
     setBody(t);
     persist({ body: t });
+    reportTyping();
   };
 
   // The people icon: if there's no partner yet, invite one first; otherwise
@@ -298,13 +334,25 @@ export default function NoteEditorScreen() {
             onUnlock={() => (note.lockType === 'biometric' ? tryBiometric() : setPinTask('unlock'))}
           />
         ) : (
-          <RichNoteEditor initialHtml={body} onChangeHtml={changeBody}>
+          <RichNoteEditor
+            initialHtml={body}
+            onChangeHtml={changeBody}
+            // Only shared notes have a second author, so only they can receive
+            // a revision from anyone else.
+            remoteHtml={isShared ? note.body : undefined}>
             <View style={styles.editorHead}>
               <TextInput
                 value={title}
                 onChangeText={(t) => {
                   setTitle(t);
                   persist({ title: t });
+                  lastTitleEditRef.current = Date.now();
+                  reportTyping();
+                }}
+                onFocus={() => setTitleFocused(true)}
+                onBlur={() => {
+                  setTitleFocused(false);
+                  flush();
                 }}
                 placeholder="Title"
                 placeholderTextColor={theme.textSecondary}
@@ -326,7 +374,9 @@ export default function NoteEditorScreen() {
                     style={[styles.presenceDot, { backgroundColor: accentFromHue(partnerHere.hue) }]}
                   />
                   <ThemedText type="small" style={{ color: accentFromHue(partnerHere.hue) }}>
-                    {partnerHere.name} is viewing this note
+                    {partnerHere.typing
+                      ? `${partnerHere.name} is typing…`
+                      : `${partnerHere.name} is viewing this note`}
                   </ThemedText>
                 </View>
               )}
