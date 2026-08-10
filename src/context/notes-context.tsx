@@ -541,6 +541,15 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
 
   const updateNote = useCallback<NotesContextValue['updateNote']>(
     async (id, patch) => {
+      // A write that changes nothing must stay a no-op. Bumping `updatedAt` and
+      // marking the note dirty would upload it, and the database's updated_at
+      // trigger fires on any UPDATE — so an empty write rewrites the real edit
+      // time on BOTH copies. The editor re-reporting identical content is the
+      // path that made a shared note look edited the moment it was opened.
+      const current = notesRef.current.find((n) => n.id === id);
+      if (current && (Object.keys(patch) as (keyof typeof patch)[]).every((k) => current[k] === patch[k])) {
+        return;
+      }
       const ts = Date.now();
       const next = notesRef.current.map((n) => (n.id === id ? { ...n, ...patch, updatedAt: ts } : n));
       setNotes(next);
