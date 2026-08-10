@@ -37,6 +37,24 @@ const CARET_MARGIN = 24;
 const REMOTE_ECHO_MS = 1000;
 
 /**
+ * Collapses whitespace that HTML itself treats as insignificant. TipTap
+ * re-serialises a document when it loads it, and the difference is almost
+ * entirely this: indentation between tags, and runs of spaces inside text.
+ */
+function squashMarkup(html: string): string {
+  return html
+    .replace(/>\s+</g, '><')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** True when two HTML strings represent the same note content, differing only in
+ *  whitespace TipTap moved around while normalising. */
+function sameMarkup(a: string, b: string): boolean {
+  return squashMarkup(a) === squashMarkup(b);
+}
+
+/**
  * True WYSIWYG note body: a TipTap rich-text editor running in a WebView, so
  * text is styled (bold / italic / headings / lists) live as you type — no marks,
  * no preview toggle. Content is HTML, stored in the note's `body`.
@@ -209,11 +227,28 @@ export function RichNoteEditor({
   // Set when we install a partner's revision; see REMOTE_ECHO_MS.
   const echoUntilRef = useRef(0);
 
+  // The editor reports its content once shortly after it finishes loading. That
+  // report is not an edit — but TipTap re-normalises HTML on the way in, so it
+  // routinely differs from `initialHtml` byte-for-byte while representing the
+  // very same note. Treating it as an edit stamped `updatedAt` with the moment
+  // the note was merely OPENED; and because the write uploads, and the database's
+  // updated_at trigger fires on any UPDATE, it destroyed the real edit time on
+  // the partner's copy too — her yesterday edit read as the moment you looked.
+  const loadedRef = useRef(false);
+
   useEffect(() => {
     if (content === undefined) return;
     // Their text, echoing back at us. Dropping it here is what keeps a partner's
     // edit from being re-saved under our name.
     if (Date.now() < echoUntilRef.current) return;
+    // Compared modulo insignificant whitespace rather than skipped outright: if
+    // the user managed to type before this first report landed, the two forms
+    // genuinely differ and the edit saves as normal. Skipping unconditionally
+    // would have silently dropped that keystroke.
+    if (!loadedRef.current) {
+      loadedRef.current = true;
+      if (sameMarkup(content, initialHtml)) return;
+    }
     onChangeHtml(content);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content]);

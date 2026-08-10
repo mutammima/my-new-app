@@ -36,6 +36,16 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: '2026-08-10',
+    added: [
+      'See when your partner is typing in a shared note. Their finished text now also appears while you have the note open, instead of only after you close and reopen it.',
+      "This screen: Settings → Updates → What's New.",
+    ],
+    fixed: [
+      'Opening a note no longer counts as editing it. A shared note now shows when your partner actually changed it, rather than the moment you last looked at it.',
+    ],
+  },
+  {
     date: '2026-08-08',
     fixed: [
       'Keeping notes in sync now uses far less data. The app had been re-downloading every note every few seconds, even when nothing had changed.',
