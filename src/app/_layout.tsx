@@ -40,6 +40,7 @@ function RootNavigator() {
           name="note/[id]"
           options={{ presentation: 'modal', headerShown: false }}
         />
+        <Stack.Screen name="updates" options={{ presentation: 'modal', headerShown: false }} />
       </Stack.Protected>
 
       <Stack.Protected guard={!user}>

@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,6 +19,7 @@ import { clearPin, getBiometricStatus, isPinSet, setPin, type BiometricStatus } 
 
 export default function SettingsScreen() {
   const theme = useTheme();
+  const router = useRouter();
   const { user, signOut, linkPartner, updateName } = useAuth();
   const { preference, setPreference, accentHue, setAccentHue } = useThemePreference();
   const { enabled: appLockEnabled, setEnabled: setAppLockEnabled } = useAppLock();
@@ -211,6 +213,17 @@ export default function SettingsScreen() {
                 trackColor={{ true: theme.accent }}
               />
             </View>
+          </Section>
+
+          <Section title="Updates">
+            <Pressable onPress={() => router.push('/updates')}>
+              <Row
+                icon="sparkles-outline"
+                label="What's new"
+                value="Everything added and fixed, newest first"
+                chevron
+              />
+            </Pressable>
           </Section>
 
           <Section title="About">
