@@ -10,7 +10,7 @@ import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 import { RPC, supabase, TABLES } from '@/lib/supabase';
-import { loadJSON, saveJSON, StorageKeys } from '@/lib/storage';
+import { loadJSON, saveJSON, StorageKeys, wipeLocalUserData } from '@/lib/storage';
 import type { User } from '@/lib/types';
 
 interface AuthContextValue {
@@ -27,6 +27,11 @@ interface AuthContextValue {
   refreshProfile: () => Promise<void>;
   /** Change the display name shown on shared notes and in greetings. */
   updateName: (name: string) => Promise<void>;
+  /**
+   * Permanently delete the signed-in account: server rows first, then every
+   * trace of it on this device. Irreversible.
+   */
+  deleteAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -113,6 +118,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
   }, []);
 
+  /**
+   * Order matters here. The RPC deletes the auth.users row, which cascades to
+   * the profile and every note the user owned; only then is the local cache
+   * cleared, so a failed RPC leaves the device untouched and the account intact
+   * rather than wiping someone's notes off their phone while the server keeps
+   * them. signOut() goes last because the session is already invalid — the row
+   * backing it no longer exists — and it is what drops the app back to the
+   * sign-in screen.
+   *
+   * The local wipe is deliberately not conditional on signOut succeeding: by
+   * that point the account is gone server-side and leaving a readable copy of
+   * the notes on the phone would be the worse failure.
+   */
+  const deleteAccount = useCallback(async () => {
+    const uid = user?.id;
+    const { error } = await supabase.rpc(RPC.deleteAccount);
+    if (error) throw new Error(error.message);
+    if (uid) await wipeLocalUserData(uid);
+    await supabase.auth.signOut();
+  }, [user?.id]);
+
   const refreshProfile = useCallback(async () => {
     const { data } = await supabase.auth.getUser();
     if (data.user) setUser(await syncProfile(data.user));
@@ -142,8 +168,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, initializing, signUp, signIn, signOut, linkPartner, refreshProfile, updateName }),
-    [user, initializing, signUp, signIn, signOut, linkPartner, refreshProfile, updateName],
+    () => ({ user, initializing, signUp, signIn, signOut, linkPartner, refreshProfile, updateName, deleteAccount }),
+    [user, initializing, signUp, signIn, signOut, linkPartner, refreshProfile, updateName, deleteAccount],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

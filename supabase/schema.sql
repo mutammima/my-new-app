@@ -81,17 +81,41 @@ $$;
 
 grant execute on function public.duonotes_link_partner(text) to authenticated;
 
+-- duonotes_my_partner_id() exists so the profiles read policy below can name the
+-- caller's partner without recursing: a policy ON duonotes_profiles that
+-- sub-selects FROM duonotes_profiles loops forever. Reading the row inside a
+-- SECURITY DEFINER function bypasses RLS and breaks that cycle.
+create or replace function public.duonotes_my_partner_id()
+returns uuid language sql security definer stable set search_path = public as $$
+  select partner_id from public.duonotes_profiles where id = auth.uid()
+$$;
+
+revoke all on function public.duonotes_my_partner_id() from public;
+grant execute on function public.duonotes_my_partner_id() to authenticated;
+
 -- ---------------------------------------------------------------------------
 -- Row-Level Security
 -- ---------------------------------------------------------------------------
 alter table public.duonotes_profiles enable row level security;
 alter table public.duonotes_notes    enable row level security;
 
--- Profiles: any signed-in user may look up profiles (needed to link a partner
--- by email). Only exposes email + display name. Users may edit only their own.
+-- Profiles. Users may edit only their own.
+-- Read your own profile and your partner's — NOT everyone's. This was
+-- `using (true)`, which let any signed-in user read every profile row, email
+-- addresses included, making the table an email-enumeration endpoint. Harmless
+-- while the only two users are a couple; a data leak the moment strangers have
+-- accounts. Linking still works because duonotes_link_partner is SECURITY
+-- DEFINER and resolves the email with RLS bypassed, so the client never needs to
+-- read a stranger's row.
 drop policy if exists duonotes_profiles_select on public.duonotes_profiles;
 create policy duonotes_profiles_select on public.duonotes_profiles
-  for select to authenticated using (true);
+  for select to authenticated using (
+    id = auth.uid()
+    or id = public.duonotes_my_partner_id()
+    -- Covers a half-linked state, where the partner has linked you but the
+    -- reverse update has not landed yet.
+    or partner_id = auth.uid()
+  );
 
 drop policy if exists duonotes_profiles_update on public.duonotes_profiles;
 create policy duonotes_profiles_update on public.duonotes_profiles
@@ -158,3 +182,36 @@ end $$;
 -- remove that now-unused schema (it's empty). Uncomment to run:
 -- drop schema if exists duonotes cascade;
 -- ---------------------------------------------------------------------------
+
+-- ---------------------------------------------------------------------------
+-- Account deletion
+--
+-- App Store guideline 5.1.1(v): an app that lets people create an account must
+-- let them delete it from inside the app.
+--
+-- One delete is enough, because everything already cascades off auth.users:
+--   auth.users        --cascade---->  duonotes_profiles
+--   duonotes_profiles --cascade---->  duonotes_notes
+--   duonotes_profiles --set null-->   the partner's partner_id
+-- so the partner is unlinked automatically and keeps their own notes. Notes the
+-- deleted user OWNED go with them, including ones they had shared: those were
+-- never the partner's rows to keep.
+--
+-- SECURITY DEFINER because the `authenticated` role cannot touch auth.users. It
+-- hard-codes auth.uid(), so it can only ever delete the caller — there is no
+-- argument to point it at somebody else.
+-- ---------------------------------------------------------------------------
+create or replace function public.duonotes_delete_account()
+returns void language plpgsql security definer set search_path = public, auth as $$
+declare
+  me uuid := auth.uid();
+begin
+  if me is null then
+    raise exception 'Not signed in';
+  end if;
+  delete from auth.users where id = me;
+end;
+$$;
+
+revoke all on function public.duonotes_delete_account() from public;
+grant execute on function public.duonotes_delete_account() to authenticated;
