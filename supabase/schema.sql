@@ -90,7 +90,13 @@ returns uuid language sql security definer stable set search_path = public as $$
   select partner_id from public.duonotes_profiles where id = auth.uid()
 $$;
 
+-- `revoke from public` is not enough on its own: Supabase sets default
+-- privileges that grant EXECUTE to anon, so anon must be named explicitly.
+-- Verified by probe — before this, an anon caller could execute both of these.
+-- Neither leaks anything (each is guarded by auth.uid(), which is null for
+-- anon), but the guard should be the second line of defence, not the only one.
 revoke all on function public.duonotes_my_partner_id() from public;
+revoke all on function public.duonotes_my_partner_id() from anon;
 grant execute on function public.duonotes_my_partner_id() to authenticated;
 
 -- ---------------------------------------------------------------------------
@@ -213,5 +219,11 @@ begin
 end;
 $$;
 
+-- `revoke from public` is not enough on its own: Supabase sets default
+-- privileges that grant EXECUTE to anon, so anon must be named explicitly.
+-- Verified by probe — before this, an anon caller could execute both of these.
+-- Neither leaks anything (each is guarded by auth.uid(), which is null for
+-- anon), but the guard should be the second line of defence, not the only one.
 revoke all on function public.duonotes_delete_account() from public;
+revoke all on function public.duonotes_delete_account() from anon;
 grant execute on function public.duonotes_delete_account() to authenticated;
