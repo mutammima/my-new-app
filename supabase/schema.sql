@@ -67,6 +67,14 @@ declare
   me  uuid := auth.uid();
   pid uuid;
 begin
+  -- Without this, an anon caller reached the updates below with `me` NULL: the
+  -- `pid = me` guard compares against NULL, which is NULL rather than true, so
+  -- it does not fire, and `set partner_id = me where id = pid` then wiped the
+  -- target's partner link. SECURITY DEFINER bypasses RLS, so nothing else
+  -- stopped it. The revoke below is the outer gate; this is the inner one.
+  if me is null then
+    raise exception 'Not signed in';
+  end if;
   select id into pid from public.duonotes_profiles where email = lower(trim(partner_email));
   if pid is null then
     raise exception 'No DuoNotes account found for %', partner_email;
@@ -79,6 +87,13 @@ begin
 end;
 $$;
 
+-- `revoke from public` is not enough on its own: Supabase sets default
+-- privileges that grant EXECUTE to anon, so anon must be named explicitly.
+-- This function was missed when the other two were revoked, which left it
+-- callable unauthenticated — an email-enumeration oracle, since "No DuoNotes
+-- account found for %" distinguishes a registered address from an unknown one.
+revoke all on function public.duonotes_link_partner(text) from public;
+revoke all on function public.duonotes_link_partner(text) from anon;
 grant execute on function public.duonotes_link_partner(text) to authenticated;
 
 -- duonotes_my_partner_id() exists so the profiles read policy below can name the
