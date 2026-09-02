@@ -101,6 +101,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       options: { data: { name: name.trim() } },
     });
     if (error) throw new Error(error.message);
+    // With BOTH "Confirm email" and "Confirm phone" enabled, Supabase stops
+    // returning `User already registered` for an address that is already taken
+    // and instead hands back an obfuscated user — no session, no error — so the
+    // address cannot be enumerated. Left alone that is indistinguishable from a
+    // genuine pending-confirmation signup, and we would cheerfully tell someone
+    // "Account created! Check your email" for somebody else's account, while no
+    // email they can act on is ever sent.
+    //
+    // The tell is an empty `identities` array; a real signup always carries
+    // exactly one `email` identity. Two guards keep this from firing wrongly:
+    // `?? -1` keeps `identities: undefined` out of the branch, since the type
+    // marks it optional and we have not been promised that shape; and requiring
+    // a null session keeps anonymous sign-ins out of it, which report no
+    // identities too but always arrive with a session.
+    if (data.user && !data.session && (data.user.identities?.length ?? -1) === 0) {
+      throw new Error('That email already has an account. Sign in instead.');
+    }
     // If a session came back, onAuthStateChange signs us in. If not, email
     // confirmation is enabled and the user must confirm before signing in.
     return { needsConfirmation: !data.session };
