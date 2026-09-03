@@ -20,6 +20,13 @@ interface AuthContextValue {
   /** Returns whether the account still needs email confirmation before sign-in. */
   signUp: (name: string, email: string, password: string) => Promise<{ needsConfirmation: boolean }>;
   signIn: (email: string, password: string) => Promise<void>;
+  /**
+   * Re-send the signup confirmation email. Needed once confirmation is on: an
+   * unconfirmed account squats its address — it cannot sign in and cannot be
+   * signed up again — so without this a lost or spam-filtered email is a dead
+   * end with no way out from inside the app.
+   */
+  resendConfirmation: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
   /** Link the partner's account by their email (both directions). */
   linkPartner: (email: string) => Promise<void>;
@@ -32,6 +39,22 @@ interface AuthContextValue {
    * trace of it on this device. Irreversible.
    */
   deleteAccount: () => Promise<void>;
+}
+
+/**
+ * Carries Supabase's error `code` alongside the message, so a screen can branch
+ * on *why* something failed instead of string-matching a server message. The
+ * codes are a stable API; the human-readable messages are not, and they are
+ * also written for developers rather than for the two people using this app.
+ */
+export class AuthActionError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = 'AuthActionError';
+  }
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -128,7 +151,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       email: email.trim().toLowerCase(),
       password,
     });
-    if (error) throw new Error(error.message);
+    if (error) throw new AuthActionError(error.message, error.code);
+  }, []);
+
+  const resendConfirmation = useCallback(async (email: string) => {
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: email.trim().toLowerCase(),
+    });
+    if (error) throw new AuthActionError(error.message, error.code);
   }, []);
 
   const signOut = useCallback(async () => {
@@ -164,7 +195,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const linkPartner = useCallback(
     async (email: string) => {
       const { error } = await supabase.rpc(RPC.linkPartner, { partner_email: email });
-      if (error) throw new Error(error.message);
+      if (error) {
+        // duonotes_link_partner raises this when no *profile* row matches the
+        // address. With email confirmation on that stops meaning "no account":
+        // the profile row is only written on first sign-in, so a partner who
+        // has signed up but not yet confirmed and opened the app has no row
+        // yet. Reporting "no account found" then states the opposite of what is
+        // true, and sends people off to re-type an address that was correct.
+        // Coupled to the message in supabase/schema.sql — keep the two in step.
+        if (error.message.startsWith('No DuoNotes account found')) {
+          throw new AuthActionError(
+            'No DuoNotes account found for that email. If they have just signed up, they need to ' +
+              'confirm their email and open DuoNotes once before you can link.',
+            error.code,
+          );
+        }
+        throw new AuthActionError(error.message, error.code);
+      }
       await refreshProfile();
     },
     [refreshProfile],
@@ -185,8 +232,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, initializing, signUp, signIn, signOut, linkPartner, refreshProfile, updateName, deleteAccount }),
-    [user, initializing, signUp, signIn, signOut, linkPartner, refreshProfile, updateName, deleteAccount],
+    () => ({
+      user,
+      initializing,
+      signUp,
+      signIn,
+      resendConfirmation,
+      signOut,
+      linkPartner,
+      refreshProfile,
+      updateName,
+      deleteAccount,
+    }),
+    [
+      user,
+      initializing,
+      signUp,
+      signIn,
+      resendConfirmation,
+      signOut,
+      linkPartner,
+      refreshProfile,
+      updateName,
+      deleteAccount,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
