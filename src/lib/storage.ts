@@ -27,6 +27,10 @@ export const StorageKeys = {
   // Pinned-to-top note ids, per person — a shared note can matter to one
   // partner and not the other, so this is deliberately not synced.
   pinned: 'duonotes.pinned', // AsyncStorage prefix — `${pinned}.${userId}` -> { [noteId]: true }
+  // Folder grouping, also per person. Lives here rather than in collections.ts
+  // so wipeLocalUserData below can clear it without importing that module —
+  // collections.ts imports this one, and the cycle would be real.
+  collections: 'duonotes.collections', // AsyncStorage prefix — `${collections}.${userId}`
 } as const;
 
 /* ------------------------------- AsyncStorage ------------------------------ */
@@ -60,4 +64,40 @@ export async function saveSecret(key: string, value: string): Promise<void> {
 
 export async function deleteSecret(key: string): Promise<void> {
   await SecureStore.deleteItemAsync(key);
+}
+
+/* ------------------------------ Account wipe ------------------------------ */
+
+export async function removeJSON(key: string): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(key);
+  } catch {
+    // Best effort. A key we cannot clear is not worth failing a deletion over,
+    // and the server rows are already gone by the time this runs.
+  }
+}
+
+/**
+ * Clears everything this device holds for one account.
+ *
+ * Called after the account is deleted server-side: at that point anything left
+ * here is an orphaned copy of notes the user explicitly asked us to destroy, and
+ * it would be handed straight to whoever signs in next on this phone.
+ *
+ * The PIN and the app-lock flag are device-wide rather than per-user, and are
+ * cleared too — leaving a deleted account's PIN behind locks the next person out
+ * of an app that has nothing in it.
+ */
+export async function wipeLocalUserData(userId: string): Promise<void> {
+  const perUser = [
+    StorageKeys.notes,
+    StorageKeys.pending,
+    StorageKeys.profile,
+    StorageKeys.seen,
+    StorageKeys.pinned,
+    StorageKeys.collections,
+  ].map((prefix) => `${prefix}.${userId}`);
+
+  await Promise.all([...perUser, StorageKeys.appLock].map(removeJSON));
+  await deleteSecret(StorageKeys.pin);
 }

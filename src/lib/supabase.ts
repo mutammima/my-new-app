@@ -58,6 +58,7 @@ export const TABLES = {
 
 export const RPC = {
   linkPartner: 'duonotes_link_partner',
+  deleteAccount: 'duonotes_delete_account',
 } as const;
 
 // During web static rendering (`web.output: "static"` in app.json) the app is

@@ -14,7 +14,7 @@
  * built-in group, so a note can never become invisible by being filed away.
  */
 
-import { loadJSON, saveJSON } from '@/lib/storage';
+import { loadJSON, saveJSON, StorageKeys } from '@/lib/storage';
 
 export const BUILT_IN = {
   shared: 'shared',
@@ -39,7 +39,7 @@ export interface CollectionState {
 
 export const EMPTY_STATE: CollectionState = { collections: [], assignments: {}, collapsed: [] };
 
-const KEY = 'duonotes.collections';
+const KEY = StorageKeys.collections;
 
 export function collectionsKey(uid: string): string {
   return `${KEY}.${uid}`;

@@ -20,7 +20,7 @@ import { clearPin, getBiometricStatus, isPinSet, setPin, type BiometricStatus } 
 export default function SettingsScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const { user, signOut, linkPartner, updateName } = useAuth();
+  const { user, signOut, linkPartner, updateName, deleteAccount } = useAuth();
   const { preference, setPreference, accentHue, setAccentHue } = useThemePreference();
   const { enabled: appLockEnabled, setEnabled: setAppLockEnabled } = useAppLock();
 
@@ -37,6 +37,13 @@ export default function SettingsScreen() {
   const [nameInput, setNameInput] = useState('');
   const [nameError, setNameError] = useState<string | null>(null);
   const [savingName, setSavingName] = useState(false);
+
+  // Deleting an account is irreversible and sits two taps from "Sign out", so it
+  // asks the user to type the word rather than tap a second button.
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState('');
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     isPinSet().then(setPinSet);
@@ -73,6 +80,29 @@ export default function SettingsScreen() {
       setNameError(e instanceof Error ? e.message : 'Could not update your name.');
     } finally {
       setSavingName(false);
+    }
+  }
+
+  function openDeleteModal() {
+    setDeleteConfirm('');
+    setDeleteError(null);
+    setShowDeleteModal(true);
+  }
+
+  async function handleDeleteAccount() {
+    if (deleteConfirm.trim().toUpperCase() !== 'DELETE') {
+      setDeleteError('Type DELETE to confirm.');
+      return;
+    }
+    setDeleteError(null);
+    setDeleting(true);
+    try {
+      await deleteAccount();
+      // Succeeded: the session is gone, so the app drops to the sign-in screen
+      // and this screen unmounts. Nothing to reset.
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : 'Could not delete your account.');
+      setDeleting(false);
     }
   }
 
@@ -234,6 +264,18 @@ export default function SettingsScreen() {
             </ThemedText>
           </Section>
 
+          <Section title="Danger zone">
+            <Pressable onPress={openDeleteModal}>
+              <Row
+                icon="trash-outline"
+                label="Delete account"
+                value="Erases your account and every note you own, on all devices"
+                danger
+                chevron
+              />
+            </Pressable>
+          </Section>
+
           <Pressable
             onPress={() => signOut()}
             style={({ pressed }) => [
@@ -269,6 +311,23 @@ export default function SettingsScreen() {
         submitting={linking}
         onSubmit={handleLinkPartner}
         onCancel={() => setShowLinkModal(false)}
+      />
+
+      <PromptModal
+        visible={showDeleteModal}
+        icon="trash-outline"
+        title="Delete your account?"
+        subtitle="This erases your account and every note you own, on all your devices, and cannot be undone. Your partner keeps their own notes, and will simply be unlinked. Type DELETE to confirm."
+        value={deleteConfirm}
+        onChangeValue={setDeleteConfirm}
+        placeholder="DELETE"
+        autoCapitalize="characters"
+        error={deleteError}
+        submitLabel="Delete for ever"
+        savingLabel="Deleting…"
+        submitting={deleting}
+        onSubmit={handleDeleteAccount}
+        onCancel={() => setShowDeleteModal(false)}
       />
 
       <PromptModal

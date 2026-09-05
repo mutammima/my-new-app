@@ -10,7 +10,7 @@ import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 import { RPC, supabase, TABLES } from '@/lib/supabase';
-import { loadJSON, saveJSON, StorageKeys } from '@/lib/storage';
+import { loadJSON, saveJSON, StorageKeys, wipeLocalUserData } from '@/lib/storage';
 import type { User } from '@/lib/types';
 
 interface AuthContextValue {
@@ -20,6 +20,13 @@ interface AuthContextValue {
   /** Returns whether the account still needs email confirmation before sign-in. */
   signUp: (name: string, email: string, password: string) => Promise<{ needsConfirmation: boolean }>;
   signIn: (email: string, password: string) => Promise<void>;
+  /**
+   * Re-send the signup confirmation email. Needed once confirmation is on: an
+   * unconfirmed account squats its address — it cannot sign in and cannot be
+   * signed up again — so without this a lost or spam-filtered email is a dead
+   * end with no way out from inside the app.
+   */
+  resendConfirmation: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
   /** Link the partner's account by their email (both directions). */
   linkPartner: (email: string) => Promise<void>;
@@ -27,6 +34,27 @@ interface AuthContextValue {
   refreshProfile: () => Promise<void>;
   /** Change the display name shown on shared notes and in greetings. */
   updateName: (name: string) => Promise<void>;
+  /**
+   * Permanently delete the signed-in account: server rows first, then every
+   * trace of it on this device. Irreversible.
+   */
+  deleteAccount: () => Promise<void>;
+}
+
+/**
+ * Carries Supabase's error `code` alongside the message, so a screen can branch
+ * on *why* something failed instead of string-matching a server message. The
+ * codes are a stable API; the human-readable messages are not, and they are
+ * also written for developers rather than for the two people using this app.
+ */
+export class AuthActionError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = 'AuthActionError';
+  }
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -96,6 +124,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       options: { data: { name: name.trim() } },
     });
     if (error) throw new Error(error.message);
+    // With BOTH "Confirm email" and "Confirm phone" enabled, Supabase stops
+    // returning `User already registered` for an address that is already taken
+    // and instead hands back an obfuscated user — no session, no error — so the
+    // address cannot be enumerated. Left alone that is indistinguishable from a
+    // genuine pending-confirmation signup, and we would cheerfully tell someone
+    // "Account created! Check your email" for somebody else's account, while no
+    // email they can act on is ever sent.
+    //
+    // The tell is an empty `identities` array; a real signup always carries
+    // exactly one `email` identity. Two guards keep this from firing wrongly:
+    // `?? -1` keeps `identities: undefined` out of the branch, since the type
+    // marks it optional and we have not been promised that shape; and requiring
+    // a null session keeps anonymous sign-ins out of it, which report no
+    // identities too but always arrive with a session.
+    if (data.user && !data.session && (data.user.identities?.length ?? -1) === 0) {
+      throw new Error('That email already has an account. Sign in instead.');
+    }
     // If a session came back, onAuthStateChange signs us in. If not, email
     // confirmation is enabled and the user must confirm before signing in.
     return { needsConfirmation: !data.session };
@@ -106,12 +151,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       email: email.trim().toLowerCase(),
       password,
     });
-    if (error) throw new Error(error.message);
+    if (error) throw new AuthActionError(error.message, error.code);
+  }, []);
+
+  const resendConfirmation = useCallback(async (email: string) => {
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: email.trim().toLowerCase(),
+    });
+    if (error) throw new AuthActionError(error.message, error.code);
   }, []);
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
   }, []);
+
+  /**
+   * Order matters here. The RPC deletes the auth.users row, which cascades to
+   * the profile and every note the user owned; only then is the local cache
+   * cleared, so a failed RPC leaves the device untouched and the account intact
+   * rather than wiping someone's notes off their phone while the server keeps
+   * them. signOut() goes last because the session is already invalid — the row
+   * backing it no longer exists — and it is what drops the app back to the
+   * sign-in screen.
+   *
+   * The local wipe is deliberately not conditional on signOut succeeding: by
+   * that point the account is gone server-side and leaving a readable copy of
+   * the notes on the phone would be the worse failure.
+   */
+  const deleteAccount = useCallback(async () => {
+    const uid = user?.id;
+    const { error } = await supabase.rpc(RPC.deleteAccount);
+    if (error) throw new Error(error.message);
+    if (uid) await wipeLocalUserData(uid);
+    await supabase.auth.signOut();
+  }, [user?.id]);
 
   const refreshProfile = useCallback(async () => {
     const { data } = await supabase.auth.getUser();
@@ -121,7 +195,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const linkPartner = useCallback(
     async (email: string) => {
       const { error } = await supabase.rpc(RPC.linkPartner, { partner_email: email });
-      if (error) throw new Error(error.message);
+      if (error) {
+        // duonotes_link_partner raises this when no *profile* row matches the
+        // address. With email confirmation on that stops meaning "no account":
+        // the profile row is only written on first sign-in, so a partner who
+        // has signed up but not yet confirmed and opened the app has no row
+        // yet. Reporting "no account found" then states the opposite of what is
+        // true, and sends people off to re-type an address that was correct.
+        // Coupled to the message in supabase/schema.sql — keep the two in step.
+        if (error.message.startsWith('No DuoNotes account found')) {
+          throw new AuthActionError(
+            'No DuoNotes account found for that email. If they have just signed up, they need to ' +
+              'confirm their email and open DuoNotes once before you can link.',
+            error.code,
+          );
+        }
+        throw new AuthActionError(error.message, error.code);
+      }
       await refreshProfile();
     },
     [refreshProfile],
@@ -142,8 +232,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, initializing, signUp, signIn, signOut, linkPartner, refreshProfile, updateName }),
-    [user, initializing, signUp, signIn, signOut, linkPartner, refreshProfile, updateName],
+    () => ({
+      user,
+      initializing,
+      signUp,
+      signIn,
+      resendConfirmation,
+      signOut,
+      linkPartner,
+      refreshProfile,
+      updateName,
+      deleteAccount,
+    }),
+    [
+      user,
+      initializing,
+      signUp,
+      signIn,
+      resendConfirmation,
+      signOut,
+      linkPartner,
+      refreshProfile,
+      updateName,
+      deleteAccount,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

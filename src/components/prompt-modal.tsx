@@ -37,7 +37,7 @@ export function PromptModal({
   onChangeValue: (value: string) => void;
   placeholder: string;
   keyboardType?: 'default' | 'email-address';
-  autoCapitalize?: 'none' | 'sentences' | 'words';
+  autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
   error: string | null;
   submitLabel: string;
   savingLabel: string;

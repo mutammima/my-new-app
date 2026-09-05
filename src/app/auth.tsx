@@ -12,14 +12,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
-import { useAuth } from '@/context/auth-context';
+import { AuthActionError, useAuth } from '@/context/auth-context';
 import { useTheme } from '@/hooks/use-theme';
 
 type Mode = 'signin' | 'signup';
 
 export default function AuthScreen() {
   const theme = useTheme();
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, resendConfirmation } = useAuth();
 
   const [mode, setMode] = useState<Mode>('signin');
   const [name, setName] = useState('');
@@ -28,12 +28,17 @@ export default function AuthScreen() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Set when sign-in failed only because the address has not been confirmed.
+  // That is the one failure the user can act on from here, so it is the one
+  // that earns an extra control rather than just red text.
+  const [unconfirmed, setUnconfirmed] = useState(false);
 
   const isSignup = mode === 'signup';
 
   async function submit() {
     setError(null);
     setNotice(null);
+    setUnconfirmed(false);
     setBusy(true);
     try {
       if (isSignup) {
@@ -47,7 +52,29 @@ export default function AuthScreen() {
         await signIn(email, password);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Something went wrong.');
+      // Supabase's own wording here is "Email not confirmed", which reads like a
+      // dead end. Say what happened and offer the way out instead.
+      if (e instanceof AuthActionError && e.code === 'email_not_confirmed') {
+        setUnconfirmed(true);
+        setError('This account has not been confirmed yet. Check your email for the link.');
+      } else {
+        setError(e instanceof Error ? e.message : 'Something went wrong.');
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resend() {
+    setError(null);
+    setNotice(null);
+    setBusy(true);
+    try {
+      await resendConfirmation(email);
+      setUnconfirmed(false);
+      setNotice('Confirmation email sent. Check your inbox, including spam.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not send that email.');
     } finally {
       setBusy(false);
     }
@@ -109,6 +136,13 @@ export default function AuthScreen() {
                 {error}
               </ThemedText>
             )}
+            {unconfirmed && (
+              <Pressable onPress={resend} disabled={busy} style={styles.resendButton}>
+                <ThemedText type="smallBold" style={{ color: theme.accent }}>
+                  Resend confirmation email
+                </ThemedText>
+              </Pressable>
+            )}
 
             <Pressable
               onPress={submit}
@@ -129,6 +163,8 @@ export default function AuthScreen() {
             <Pressable
               onPress={() => {
                 setError(null);
+                setNotice(null);
+                setUnconfirmed(false);
                 setMode(isSignup ? 'signin' : 'signup');
               }}
               style={styles.switchButton}>
@@ -201,5 +237,6 @@ const styles = StyleSheet.create({
     marginTop: Spacing.two,
   },
   primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  resendButton: { alignSelf: 'flex-start', paddingVertical: Spacing.one },
   switchButton: { alignItems: 'center', paddingVertical: Spacing.two },
 });

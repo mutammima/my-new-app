@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DuoNotes — Privacy Policy</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --fg: #1d1d1f; --muted: #6b6b70;
+    --rule: #e6e6e3; --accent: #3f6f52; --card: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#141416; --fg:#ececed; --muted:#9a9aa0; --rule:#2a2a2e; --accent:#8fc0a2; --card:#1c1c1f; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  main { max-width: 44rem; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
+  h1 { font-size: 1.9rem; line-height: 1.2; margin: 0 0 .4rem; letter-spacing: -.02em; }
+  h2 { font-size: 1.15rem; margin: 2.4rem 0 .6rem; letter-spacing: -.01em; }
+  .sub { color: var(--muted); margin: 0 0 2.5rem; font-size: .95rem; }
+  p, li { color: var(--fg); }
+  ul { padding-left: 1.15rem; }
+  li { margin: .35rem 0; }
+  a { color: var(--accent); }
+  hr { border: 0; border-top: 1px solid var(--rule); margin: 2.5rem 0; }
+  .callout {
+    background: var(--card); border: 1px solid var(--rule); border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: .9rem 1.1rem; margin: 1.2rem 0;
+  }
+  .callout p { margin: .3rem 0; }
+  code { background: var(--card); border: 1px solid var(--rule); border-radius: 4px; padding: .1rem .35rem; font-size: .9em; }
+  footer { color: var(--muted); font-size: .875rem; margin-top: 3rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>DuoNotes Privacy Policy</h1>
+  <p class="sub">Last updated 3 September 2026</p>
+
+  <p>DuoNotes is a private shared-notes app for two people. This policy describes what
+  the app stores, where it goes, and how to get rid of it. It is written to be read,
+  not to be survived.</p>
+
+  <h2>What DuoNotes stores</h2>
+  <ul>
+    <li><strong>Your email address</strong> — used to sign you in and to let your partner link to you.</li>
+    <li><strong>A display name</strong> — whatever you type. It appears on shared notes and in greetings.</li>
+    <li><strong>Your notes</strong> — titles, body text, drawings, and any photos you add. Photos are
+      embedded directly inside the note rather than stored separately.</li>
+    <li><strong>Who you are linked to</strong> — the account you have connected as your partner.</li>
+    <li><strong>Timestamps</strong> — when each note was created and last changed.</li>
+  </ul>
+
+  <h2>What DuoNotes does not collect</h2>
+  <p>There is no analytics, no advertising, no crash reporting, and no third-party tracking of
+  any kind in this app. It does not collect your location, your contacts, or an advertising
+  identifier. No data is sold, shared, or handed to anyone for marketing.</p>
+
+  <h2>Who can see your notes</h2>
+  <ul>
+    <li><strong>You.</strong></li>
+    <li><strong>Your linked partner</strong> — but only for notes you explicitly choose to share.
+      Notes you have not shared are visible to you alone. This is enforced by database access
+      rules on the server, not only by the app.</li>
+    <li><strong>Whoever operates this app's database.</strong> DuoNotes is run privately by one
+      person on their own Supabase project. That operator has technical access to the database,
+      as the operator of any self-hosted service does.</li>
+  </ul>
+
+  <h2>Encryption — plainly</h2>
+  <div class="callout">
+    <p>Traffic between your phone and the server is encrypted in transit (HTTPS).</p>
+    <p><strong>Note contents are not yet encrypted at rest.</strong> They are stored as ordinary
+    text in the database.</p>
+    <p><strong>The note lock is a gate, not encryption.</strong> A PIN- or Face&nbsp;ID-locked note
+    is hidden behind that check on your device — it is not scrambled. Anyone with database access
+    could read it.</p>
+  </div>
+  <p>End-to-end encryption of note bodies is planned but not implemented. This policy will be
+  updated when that changes, and not before.</p>
+
+  <h2>What stays on your phone</h2>
+  <ul>
+    <li>A copy of your notes, so the app works without a signal.</li>
+    <li>Your app-lock PIN, stored as a salted hash in the iOS keychain. The PIN itself is never
+      stored and never leaves your device.</li>
+    <li>Small preferences: pinned notes, folders, theme.</li>
+  </ul>
+
+  <h2>Deleting everything</h2>
+  <p>Open <strong>Settings → Danger zone → Delete account</strong>. This immediately and permanently
+  removes your account, your profile, and every note you own from the server, and wipes the app's
+  data from your phone. It cannot be undone. If you were linked to a partner, they keep their own
+  notes and are simply unlinked.</p>
+
+  <h2>Children</h2>
+  <p>DuoNotes is not directed at children under 13 and is not intended for their use.</p>
+
+  <h2>Changes</h2>
+  <p>If this policy changes, the updated version appears on this page with a new date.</p>
+
+  <h2>Contact</h2>
+  <p>Questions about this policy or your data: <a href="mailto:CONTACT_EMAIL_HERE">CONTACT_EMAIL_HERE</a></p>
+
+  <hr>
+  <footer>DuoNotes is an independent app. It is not affiliated with Apple or Supabase.</footer>
+</main>
+</body>
+</html>
